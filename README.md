@@ -2,7 +2,7 @@
 
 A full-stack civic complaint management system built for citizens and administrators. Citizens can submit geo-tagged complaints with photos, track resolution status in real time, and view a live heatmap of issues across the city. Admins get a full dashboard with stats, filters, and instant status updates.
 
-**Live Demo:** [civic-frontend.vercel.app](https://smart-civic-system-njlbkf56l-raj-balrams-projects.vercel.app)
+**Live Demo:** [civic-frontend.vercel.app](https://smart-civic-system.vercel.app/)
 
 ---
 
