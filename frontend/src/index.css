@@ -1,0 +1,59 @@
+/* Google Fonts */
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap");
+
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "DM Sans", sans-serif;
+  --font-mono: "DM Mono", monospace;
+
+  --color-navy:         #0f2645;
+  --color-navy-light:   #1a3a5c;
+  --color-navy-hover:   #162f4d;
+
+  --color-accent:       #1d6fbb;
+  --color-accent-light: #e8f1fb;
+  --color-accent-hover: #1560a4;
+
+  --color-surface:      #ffffff;
+  --color-surface-2:    #f5f6f8;
+  --color-surface-3:    #eceef2;
+
+  --color-border:       #dde0e6;
+  --color-border-dark:  #c4c8d0;
+
+  --color-text-1:       #0f1923;
+  --color-text-2:       #3d4a5c;
+  --color-text-3:       #6b7a90;
+
+  --color-success:      #1a7a4a;
+  --color-success-bg:   #e6f4ed;
+  --color-warning:      #92600a;
+  --color-warning-bg:   #fef3df;
+  --color-danger:       #a02020;
+  --color-danger-bg:    #fdeaea;
+
+  --radius-sm:  4px;
+  --radius-md:  6px;
+  --radius-lg:  10px;
+  --radius-xl:  14px;
+
+  --shadow-sm: 0 1px 3px rgba(15,38,69,0.08);
+  --shadow-md: 0 4px 12px rgba(15,38,69,0.10);
+}
+
+
+/* Base resets */
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--color-surface-2);
+  color: var(--color-text-1);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border-dark); border-radius: 3px; }
