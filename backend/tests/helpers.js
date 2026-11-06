@@ -21,6 +21,7 @@ async function startTestServer() {
     app,
     url: `http://localhost:${server.address().port}`,
     stop: async () => {
+      await sleep(300); // let background socket notifications finish before the database closes
       await new Promise((resolve) => io.close(resolve)); // also closes the HTTP server
       await mongoose.disconnect();
       await mongod.stop();
