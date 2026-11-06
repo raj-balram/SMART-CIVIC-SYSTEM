@@ -1,12 +1,15 @@
 const Complaint = require("../models/Complaint");
 const { rooms } = require("./events");
+const { toCitizenView } = require("../services/complaintService");
 
-// Sends a complaint event ONLY to admins and to the complaint's owner.
 async function notifyComplaint(io, event, complaintId, ownerId) {
   if (!io) return;
-  const payload = await Complaint.findById(complaintId).populate("user", "name email").lean();
-  if (!payload) return;
-  io.to(rooms.admin).to(rooms.user(ownerId)).emit(event, payload);
+  const full = await Complaint.findById(complaintId).populate("user", "name email").lean();
+  if (!full) return;
+
+  io.to(rooms.admin).emit(event, full);
+  // .except(admin): an owner who is also an admin must not receive the event twice
+  io.to(rooms.user(ownerId)).except(rooms.admin).emit(event, toCitizenView(full));
 }
 
 module.exports = { notifyComplaint };

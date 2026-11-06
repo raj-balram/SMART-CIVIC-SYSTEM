@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const connectDB = require("../config/db");
 const User = require("../models/User");
 const Complaint = require("../models/Complaint");
+const { toGeoPoint } = require("../utils/workflow");
 
 // Safety: never seed a remote (production) database by accident
 if (!/127\.0\.0\.1|localhost/.test(env.MONGO_URI) && process.env.ALLOW_REMOTE_SEED !== "1") {
@@ -80,7 +81,7 @@ async function main() {
   const adminPassword = await bcrypt.hash("Admin@12345", 10);
   const citizenPassword = await bcrypt.hash("Citizen@12345", 10);
 
-  await User.create({ name: "Demo Admin", email: "admin@civic.test", password: adminPassword, role: "admin" });
+  const adminUser = await User.create({ name: "Demo Admin", email: "admin@civic.test", password: adminPassword, role: "admin" });
   const citizens = [];
   for (let i = 1; i <= 5; i++) {
     citizens.push(
@@ -88,7 +89,7 @@ async function main() {
     );
   }
 
-  const now = Date.now();
+    const now = Date.now();
   const docs = [];
   for (let i = 0; i < COUNT; i++) {
     const category = weighted([["Road", 0.3], ["Garbage", 0.25], ["Water", 0.2], ["Electricity", 0.15], ["Other", 0.1]]);
@@ -97,6 +98,7 @@ async function main() {
     const lat = +(spot.lat + (rand() - 0.5) * 2 * spot.spread).toFixed(6);
     const lng = +(spot.lng + (rand() - 0.5) * 2 * spot.spread).toFixed(6);
 
+    const owner = pick(citizens)._id;
     const createdAt = new Date(now - rand() * 60 * DAY);
     const status = weighted([["Pending", 0.4], ["In Progress", 0.3], ["Resolved", 0.3]]);
     let updatedAt = createdAt;
@@ -104,14 +106,24 @@ async function main() {
       updatedAt = new Date(Math.min(now, createdAt.getTime() + (0.5 + rand() * 6) * DAY));
     }
 
+    const statusHistory = [{ status: "Pending", by: owner, at: createdAt, note: "" }];
+    if (status === "Resolved") {
+      const midpoint = new Date((createdAt.getTime() + updatedAt.getTime()) / 2);
+      statusHistory.push({ status: "In Progress", by: adminUser._id, at: midpoint, note: "" });
+    }
+    if (status !== "Pending") statusHistory.push({ status, by: adminUser._id, at: updatedAt, note: "" });
+
     docs.push({
-      user: pick(citizens)._id,
+      user: owner,
       title,
       description,
       category,
       image: "",
       location: { lat, lng },
+      geo: toGeoPoint(lat, lng),
       status,
+      statusHistory,
+      resolvedAt: status === "Resolved" ? updatedAt : null,
       createdAt,
       updatedAt,
       __v: 0,

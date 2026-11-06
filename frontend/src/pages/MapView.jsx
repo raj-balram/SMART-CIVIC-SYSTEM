@@ -99,7 +99,7 @@ const MapView = () => {
       socket.off("complaint:updated", onUpdated);
     };
   }, [socket]);
-  
+
   /* Filtered list */
   const visible = filterStatus === "All"
     ? complaints
@@ -256,6 +256,18 @@ const MapView = () => {
                         <p style={{ fontSize: "11px", color: "#6b7a90" }}>
                           By {c.user.name}
                         </p>
+                      )}
+                      
+                      {/* Progress timeline */}
+                      {Array.isArray(c.statusHistory) && c.statusHistory.length > 0 && (
+                        <div style={{ marginTop: 8, borderTop: "1px solid #eef0f3", paddingTop: 6 }}>
+                          {c.statusHistory.slice(-3).reverse().map((h, i) => (
+                            <p key={i} style={{ fontSize: "11px", color: "#6b7a90", margin: "2px 0", lineHeight: 1.4 }}>
+                              <strong>{h.status}</strong> · {new Date(h.at).toLocaleDateString()}
+                              {h.note ? `: ${h.note}` : ""}
+                            </p>
+                          ))}
+                        </div>
                       )}
 
                       {/* Image */}

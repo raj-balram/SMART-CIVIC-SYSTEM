@@ -1,7 +1,6 @@
 const { z } = require("zod");
+const { CATEGORIES, STATUSES } = require("../utils/workflow");
 
-const CATEGORIES = ["Road", "Garbage", "Electricity", "Water", "Other"];
-const STATUSES = ["Pending", "In Progress", "Resolved"];
 
 const email = z.string().trim().toLowerCase().email("Enter a valid email address").max(254, "Email is too long");
 const name = z
@@ -52,6 +51,25 @@ const createComplaintSchema = z.object({
 
 const updateStatusSchema = z.object({
   status: z.enum(STATUSES, { message: `Status must be one of: ${STATUSES.join(", ")}` }),
+  note: z.string().trim().max(200, "Note must be 200 characters or fewer").optional(),
+});
+
+const nearbyQuerySchema = z.object({
+  lat: coordinate("Latitude", -90, 90),
+  lng: coordinate("Longitude", -180, 180),
+  radius: z
+    .string()
+    .trim()
+    .default("200")
+    .refine((v) => v !== "" && Number.isFinite(Number(v)), "Radius must be a number")
+    .transform(Number)
+    .pipe(
+      z
+        .number()
+        .min(10, "Radius must be between 10 and 5000 metres")
+        .max(5000, "Radius must be between 10 and 5000 metres")
+    ),
+  category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
 });
 
 module.exports = {
@@ -62,4 +80,5 @@ module.exports = {
   updateProfileSchema,
   createComplaintSchema,
   updateStatusSchema,
+  nearbyQuerySchema,
 };

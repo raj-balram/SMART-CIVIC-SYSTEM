@@ -1,67 +1,63 @@
 const Complaint = require("../models/Complaint");
 const streamUpload = require("../utils/cloudinaryUpload");
 const AppError = require("../utils/AppError");
+const complaintService = require("../services/complaintService");
+const { toCitizenView } = complaintService;
 const { notifyComplaint } = require("../socket/notify");
 const { EVENTS } = require("../socket/events");
 
-// CREATE COMPLAINT (input already validated by the route)
+const notify = (req, event, complaint) =>
+  notifyComplaint(req.app.get("io"), event, complaint._id, complaint.user).catch((err) =>
+    console.error("Socket notify failed:", err)
+  );
+
 exports.createComplaint = async (req, res) => {
   const { title, description, category, lat, lng } = req.body;
 
-  let imageUrl = "";
+  let image = "";
   if (req.file) {
     try {
-      imageUrl = (await streamUpload(req.file.buffer)).secure_url;
+      image = (await streamUpload(req.file.buffer)).secure_url;
     } catch (err) {
       console.error("Image upload failed:", err);
       throw new AppError(502, "Image upload failed, please try again");
     }
   }
 
-  const complaint = await Complaint.create({
+  const complaint = await complaintService.create({
     user: req.user._id, // always the logged-in user, never a value from the request
-    title,
-    description,
-    category,
-    image: imageUrl,
-    location: { lat, lng },
-    status: "Pending",
+    title, description, category, image, lat, lng,
   });
 
-  notifyComplaint(req.app.get("io"), EVENTS.COMPLAINT_CREATED, complaint._id, req.user._id).catch(
-    (err) => console.error("Socket notify failed:", err)
-  );
-
+  notify(req, EVENTS.COMPLAINT_CREATED, complaint);
   res.status(201).json(complaint);
 };
 
-// GET MY COMPLAINTS
 exports.getComplaints = async (req, res) => {
-  res.json(await Complaint.find({ user: req.user._id }).sort({ createdAt: -1 }));
+  const complaints = await Complaint.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+  res.json(complaints.map(toCitizenView));
 };
 
-// GET ALL COMPLAINTS (admin only, enforced by the route)
 exports.getAllComplaintAdmin = async (req, res) => {
   res.json(await Complaint.find().populate("user", "name email").sort({ createdAt: -1 }));
 };
 
-// UPDATE STATUS (admin only, enforced by the route)
 exports.updateStatus = async (req, res) => {
-  const complaint = await Complaint.findByIdAndUpdate(
-    req.params.id,
-    { status: req.body.status },
-    { returnDocument: "after" }
-  );
-  if (!complaint) throw new AppError(404, "Complaint not found");
+  const complaint = await complaintService.changeStatus({
+    id: req.params.id,
+    to: req.body.status,
+    adminId: req.user._id,
+    note: req.body.note,
+  });
 
-  notifyComplaint(req.app.get("io"), EVENTS.COMPLAINT_UPDATED, complaint._id, complaint.user).catch(
-    (err) => console.error("Socket notify failed:", err)
-  );
-
+  notify(req, EVENTS.COMPLAINT_UPDATED, complaint);
   res.json({ message: "Status updated", complaint });
 };
 
-// ADMIN STATS (admin only, enforced by the route)
+exports.getNearby = async (req, res) => {
+  res.json(await complaintService.findNearby(req.validatedQuery));
+};
+
 exports.getStats = async (req, res) => {
   const [total, pending, inProgress, resolved, categoryCounts] = await Promise.all([
     Complaint.countDocuments(),

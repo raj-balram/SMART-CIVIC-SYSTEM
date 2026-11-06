@@ -99,29 +99,31 @@ const CategoryChart = ({ data, total }) => {
   );
 };
 
-/* Status action buttons */
-const StatusActions = ({ id, current, onUpdate }) => {
-  const actions = [
-    { label: "Pending",     cls: "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200" },
-    { label: "In Progress", cls: "bg-blue-50  hover:bg-blue-100  text-blue-700  border border-blue-200"  },
-    { label: "Resolved",    cls: "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200" },
-  ];
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {actions.map(({ label, cls }) => (
-        <button
-          key={label}
-          onClick={() => onUpdate(id, label)}
-          disabled={current === label}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border-none
-            ${current === label ? "opacity-40 cursor-not-allowed" : cls}`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
+/* Status action buttons: only the moves the server will accept */
+const NEXT_STATUSES = {
+  Pending: ["In Progress"],
+  "In Progress": ["Pending", "Resolved"],
+  Resolved: ["In Progress"],
 };
+const ACTION_STYLES = {
+  Pending: "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200",
+  "In Progress": "bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200",
+  Resolved: "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200",
+};
+
+const StatusActions = ({ id, current, onUpdate }) => (
+  <div className="flex items-center gap-1.5 flex-wrap">
+    {(NEXT_STATUSES[current] ?? []).map((label) => (
+      <button
+        key={label}
+        onClick={() => onUpdate(id, label)}
+        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border-none ${ACTION_STYLES[label]}`}
+      >
+        → {label}
+      </button>
+    ))}
+  </div>
+);
 
 /* ── Main Dashboard ─────────────────────────────────────────── */
 const AdminDashboard = () => {
@@ -187,22 +189,18 @@ const AdminDashboard = () => {
       resolved: complaints.filter((c) => c.status === "Resolved").length,
     }));
   }, [complaints]);
-  /* Update status */
+  
+   /* Update status */
   const updateStatus = async (id, status) => {
+    const note = window.prompt(`Move to "${status}". Add a short note for the citizen (optional):`, "");
+    if (note === null) return; // cancelled
     try {
-      await API.put(`/complaints/${id}/status`, { status });
-      setComplaints((prev) => prev.map((c) => c._id === id ? { ...c, status } : c));
-      // Recompute stats client-side
-      const updated = complaints.map((c) => c._id === id ? { ...c, status } : c);
-      setStats((prev) => ({
-        ...prev,
-        pending:    updated.filter((c) => c.status === "Pending").length,
-        inProgress: updated.filter((c) => c.status === "In Progress").length,
-        resolved:   updated.filter((c) => c.status === "Resolved").length,
-      }));
+      const res = await API.put(`/complaints/${id}/status`, { status, note: note.trim().slice(0, 200) });
+      // the response is not populated, so keep the reporter's name and email we already have
+      setComplaints((prev) => prev.map((c) => (c._id === id ? { ...c, ...res.data.complaint, user: c.user } : c)));
       toast.success("Status updated");
-    } catch {
-      toast.error("Failed to update status");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update status");
     }
   };
 
