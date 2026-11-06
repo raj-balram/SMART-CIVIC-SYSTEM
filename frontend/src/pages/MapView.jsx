@@ -84,14 +84,22 @@ const MapView = () => {
     fetch();
   }, [user]);
 
-  /* Real-time */
+    /* Real-time */
   useEffect(() => {
     if (!socket) return;
-    socket.on("newComplaint", (c) => setComplaints((p) => [c, ...p]));
-    socket.on("statusUpdated", (c) => setComplaints((p) => p.map((x) => x._id === c._id ? c : x)));
-    return () => { socket.off("newComplaint"); socket.off("statusUpdated"); };
-  }, [socket]);
+    const onCreated = (c) =>
+      setComplaints((p) => (p.some((x) => x._id === c._id) ? p : [c, ...p]));
+    const onUpdated = (c) =>
+      setComplaints((p) => p.map((x) => (x._id === c._id ? c : x)));
 
+    socket.on("complaint:created", onCreated);
+    socket.on("complaint:updated", onUpdated);
+    return () => {
+      socket.off("complaint:created", onCreated);
+      socket.off("complaint:updated", onUpdated);
+    };
+  }, [socket]);
+  
   /* Filtered list */
   const visible = filterStatus === "All"
     ? complaints

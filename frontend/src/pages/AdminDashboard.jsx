@@ -156,18 +156,37 @@ const AdminDashboard = () => {
 
   useEffect(() => { fetchAll(); }, []);
 
-  /* Real-time new complaint */
+    /* Real-time: new complaints, and status changes made by other admins */
   useEffect(() => {
     if (!socket) return;
-    socket.on("newComplaint", (c) => {
-      setComplaints((prev) => [c, ...prev]);
-      setStats((prev) => ({ ...prev, total: prev.total + 1, pending: prev.pending + 1 }));
+
+    const onCreated = (c) => {
+      setComplaints((prev) => (prev.some((x) => x._id === c._id) ? prev : [c, ...prev]));
       setNewCount((n) => n + 1);
       toast.success(`New complaint: ${c.title}`);
-    });
-    return () => socket.off("newComplaint");
+    };
+    const onUpdated = (c) => {
+      setComplaints((prev) => prev.map((x) => (x._id === c._id ? c : x)));
+    };
+
+    socket.on("complaint:created", onCreated);
+    socket.on("complaint:updated", onUpdated);
+    return () => {
+      socket.off("complaint:created", onCreated);
+      socket.off("complaint:updated", onUpdated);
+    };
   }, [socket]);
 
+  /* Keep the summary cards in sync with the list */
+  useEffect(() => {
+    setStats((prev) => ({
+      ...prev,
+      total: complaints.length,
+      pending: complaints.filter((c) => c.status === "Pending").length,
+      inProgress: complaints.filter((c) => c.status === "In Progress").length,
+      resolved: complaints.filter((c) => c.status === "Resolved").length,
+    }));
+  }, [complaints]);
   /* Update status */
   const updateStatus = async (id, status) => {
     try {

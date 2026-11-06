@@ -1,33 +1,13 @@
 const env = require("./config/env"); // must be first: loads and validates .env
 const http = require("http");
-const express = require("express");
-const cors = require("cors");
 const mongoose = require("mongoose");
-const { Server } = require("socket.io");
+const app = require("./app");
 const connectDB = require("./config/db");
+const { initSocket } = require("./socket");
 
-const app = express();
 const server = http.createServer(app);
-
-// Socket.IO is rewritten in Phase 1 (authentication and rooms). Unchanged for now.
-const io = new Server(server, { cors: { origin: "*" } });
-io.on("connection", (socket) => {
-  console.log("Socket connected:", socket.id);
-  socket.on("disconnect", () => console.log("Socket disconnected:", socket.id));
-});
+const io = initSocket(server);
 app.set("io", io);
-
-app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
-app.use(express.json());
-
-app.get("/", (req, res) => res.send("API Running"));
-app.get("/health", (req, res) => {
-  const mongoOk = mongoose.connection.readyState === 1;
-  res.status(mongoOk ? 200 : 503).json({ mongo: mongoOk });
-});
-
-app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/complaints", require("./routes/complaintRoutes"));
 
 async function start() {
   await connectDB();

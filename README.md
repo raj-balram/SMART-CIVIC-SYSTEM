@@ -83,8 +83,8 @@ A full-stack civic complaint management system built for citizens and administra
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/raj-balram/civic-backend.git
-git clone https://github.com/raj-balram/civic-frontend.git
+git clone https://github.com/raj-balram/SMART-CIVIC-SYSTEM.git
+cd SMART-CIVIC-SYSTEM
 ```
 
 ### 2. Backend setup

@@ -1,13 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import Map from "../components/Map";
 import API from "../utils/api";
 import toast from "react-hot-toast";
-import { useAuth } from "../context/AuthContext";
 
 const CATEGORIES = ["Road", "Garbage", "Electricity", "Water", "Other"];
 
 const ComplaintForm = () => {
-  const { socket } = useAuth();
 
   const [form, setForm] = useState({ title: "", description: "", category: "Road" });
   const [image, setImage]     = useState(null);
@@ -15,14 +13,6 @@ const ComplaintForm = () => {
   const [location, setLocation] = useState(null);
   const [loading, setLoading]   = useState(false);
 
-  /* Real-time: notify user when their complaint gets a status update */
-  useEffect(() => {
-    if (!socket) return;
-    socket.on("newComplaint", (c) => {
-      toast.success(`Complaint received: ${c.title}`);
-    });
-    return () => socket.off("newComplaint");
-  }, [socket]);
 
   const handleImage = (file) => {
     if (!file) return;

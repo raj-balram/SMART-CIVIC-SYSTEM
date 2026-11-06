@@ -1,5 +1,7 @@
 const Complaint = require("../models/Complaint");
 const streamUpload = require("../utils/cloudinaryUpload");
+const { notifyComplaint } = require("../socket/notify");
+const { EVENTS } = require("../socket/events");
 
 const categories = ["Road", "Garbage", "Electricity", "Water", "Other"];
 const statuses = ["Pending", "In Progress", "Resolved"];
@@ -31,8 +33,9 @@ exports.createComplaint = async (req, res) => {
       status: "Pending",
     });
 
-    const io = req.app.get("io");
-    io.emit("newComplaint", complaint);
+    notifyComplaint(req.app.get("io"), EVENTS.COMPLAINT_CREATED, complaint._id, req.user._id).catch(
+      (err) => console.error("Socket notify failed:", err)
+    );
 
     res.status(201).json(complaint);
   } catch (err) {
@@ -86,8 +89,9 @@ exports.updateStatus = async (req, res) => {
     complaint.status = status;
     await complaint.save();
 
-    const io = req.app.get("io");
-    io.emit(`statusUpdate_${complaint.user}`, complaint);
+    notifyComplaint(req.app.get("io"), EVENTS.COMPLAINT_UPDATED, complaint._id, complaint.user).catch(
+      (err) => console.error("Socket notify failed:", err)
+    );
 
     res.json({ message: "Status updated", complaint });
   } catch (err) {
