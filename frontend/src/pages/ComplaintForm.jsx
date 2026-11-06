@@ -37,8 +37,12 @@ const ComplaintForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!form.title.trim() || !form.description.trim()) {
-      toast.error("Title and description are required");
+    if (form.title.trim().length < 3) {
+      toast.error("Title must be at least 3 characters");
+      return;
+    }
+    if (form.description.trim().length < 10) {
+      toast.error("Description must be at least 10 characters");
       return;
     }
     if (!location) {

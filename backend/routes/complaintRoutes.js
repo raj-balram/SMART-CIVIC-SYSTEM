@@ -1,14 +1,34 @@
 const express = require("express");
-const router = express.Router();
 const protect = require("../middlewares/authMiddleware");
-const upload = require("../middlewares/upload");
-const { getStats } = require("../controllers/complaintController");
-const { createComplaint, getComplaints, getAllComplaintAdmin, updateStatus } = require("../controllers/complaintController");
+const requireRole = require("../middlewares/requireRole");
+const { upload, verifyImage } = require("../middlewares/upload");
+const { validateBody, validateObjectId } = require("../middlewares/validate");
+const { createComplaintLimiter } = require("../middlewares/rateLimit");
+const { createComplaintSchema, updateStatusSchema } = require("../validators/schemas");
+const {
+  createComplaint,
+  getComplaints,
+  getAllComplaintAdmin,
+  updateStatus,
+  getStats,
+} = require("../controllers/complaintController");
 
-router.post("/", protect, upload.single("image"), createComplaint);
-router.get("/", protect, getComplaints);
-router.get("/all", protect, getAllComplaintAdmin);
-router.put("/:id/status", protect, updateStatus);
-router.get("/stats", protect, getStats);
+const router = express.Router();
+
+router.use(protect);
+
+// order matters: limit first, then parse the upload, check it, then validate the fields
+router.post(
+  "/",
+  createComplaintLimiter,
+  upload.single("image"),
+  verifyImage,
+  validateBody(createComplaintSchema),
+  createComplaint
+);
+router.get("/", getComplaints);
+router.get("/all", requireRole("admin"), getAllComplaintAdmin);
+router.get("/stats", requireRole("admin"), getStats);
+router.put("/:id/status", requireRole("admin"), validateObjectId("id"), validateBody(updateStatusSchema), updateStatus);
 
 module.exports = router;

@@ -6,8 +6,9 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(5000),
   MONGO_URI: z.string().min(1),
   JWT_SECRET: z.string().min(1),
-  ADMIN_SECRET: z.string().optional(), // removed in Phase 2
   FRONTEND_URL: z.string().min(1).default("http://localhost:5173"),
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+  MAX_IMAGE_BYTES: z.coerce.number().int().positive().default(5 * 1024 * 1024),
   CLOUDINARY_CLOUD_NAME: z.string().min(1),
   CLOUDINARY_API_KEY: z.string().min(1),
   CLOUDINARY_API_SECRET: z.string().min(1),

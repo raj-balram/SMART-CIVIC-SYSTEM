@@ -7,17 +7,17 @@ const complaintSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    title: { type: String, required: true },
-    description: { type: String, required: true },
+    title: { type: String, required: true, trim: true, maxlength: 100 },
+    description: { type: String, required: true, trim: true, maxlength: 500 },
     category: {
       type: String,
       enum: ["Road", "Garbage", "Electricity", "Water", "Other"],
       required: true,
     },
-    image: String,
+    image: { type: String, default: "" },
     location: {
-      lat: { type: Number, required: true },
-      lng: { type: Number, required: true },
+      lat: { type: Number, required: true, min: -90, max: 90 },
+      lng: { type: Number, required: true, min: -180, max: 180 },
     },
     // ✅ Fixed: all values now Title Case to match controller + frontend
     status: {

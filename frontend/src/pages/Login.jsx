@@ -25,8 +25,12 @@ const Login = () => {
       );
       toast.success("Welcome back");
       navigate("/");
-    } catch {
-      toast.error("Invalid email or password");
+    } catch (err) {
+      toast.error(
+        err.response?.status === 429
+          ? err.response.data.message
+          : "Invalid email or password"
+      );
     } finally {
       setLoading(false);
     }
