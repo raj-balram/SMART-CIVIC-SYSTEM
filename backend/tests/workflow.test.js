@@ -149,18 +149,22 @@ describe("privacy", () => {
 });
 
 describe("indexes", () => {
-  test("the compound and geo indexes exist", async () => {
+  test("the compound, geo, resolution and text indexes exist", async () => {
     await Complaint.init(); // wait until the indexes are built
-    const keys = (await Complaint.collection.indexes()).map((i) => JSON.stringify(i.key));
+    const indexes = await Complaint.collection.indexes();
+    const keys = indexes.map((i) => JSON.stringify(i.key));
 
     expect(keys).toEqual(
       expect.arrayContaining([
         JSON.stringify({ user: 1, createdAt: -1 }),
-        JSON.stringify({ status: 1, createdAt: -1 }),
+        JSON.stringify({ status: 1, createdAt: -1, _id: -1 }),
         JSON.stringify({ category: 1, status: 1 }),
+        JSON.stringify({ createdAt: -1, _id: -1 }),
+        JSON.stringify({ resolvedAt: 1 }),
         JSON.stringify({ geo: "2dsphere" }),
       ])
     );
+    expect(indexes.some((i) => i.name === "complaint_text")).toBe(true);
   });
 });
 

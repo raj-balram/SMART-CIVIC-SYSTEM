@@ -4,11 +4,17 @@ const requireRole = require("../middlewares/requireRole");
 const { upload, verifyImage } = require("../middlewares/upload");
 const { validateBody, validateQuery, validateObjectId } = require("../middlewares/validate");
 const { createComplaintLimiter } = require("../middlewares/rateLimit");
-const { createComplaintSchema, updateStatusSchema, nearbyQuerySchema } = require("../validators/schemas");
+const {
+  createComplaintSchema,
+  updateStatusSchema,
+  nearbyQuerySchema,
+  adminListQuerySchema,
+} = require("../validators/schemas");
 const {
   createComplaint,
   getComplaints,
   getAllComplaintAdmin,
+  listComplaints,
   updateStatus,
   getNearby,
   getStats,
@@ -28,6 +34,7 @@ router.post(
 );
 router.get("/", getComplaints);
 router.get("/nearby", validateQuery(nearbyQuerySchema), getNearby);
+router.get("/list", requireRole("admin"), validateQuery(adminListQuerySchema), listComplaints);
 router.get("/all", requireRole("admin"), getAllComplaintAdmin);
 router.get("/stats", requireRole("admin"), getStats);
 router.put("/:id/status", requireRole("admin"), validateObjectId("id"), validateBody(updateStatusSchema), updateStatus);

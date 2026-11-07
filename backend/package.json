@@ -10,8 +10,10 @@
     "seed": "node scripts/seed.js",
     "create-admin": "node scripts/create-admin.js",
     "normalize-emails": "node scripts/normalize-emails.js",
-    "migrate:phase3": "node scripts/migrate-phase3.js",
-    "explain": "node scripts/explain-indexes.js"
+    "explain": "node scripts/explain-indexes.js",
+    "migrate:phase3": "node scripts/migrate-phase3.js --apply",
+    "migrate:phase3:dry": "node scripts/migrate-phase3.js",
+    "sync-indexes": "node scripts/sync-indexes.js"
   },
   "keywords": [],
   "author": "",

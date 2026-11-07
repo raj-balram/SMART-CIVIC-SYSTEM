@@ -55,9 +55,10 @@ async function migrate({ dryRun = false, log = console.warn } = {}) {
 if (require.main === module) {
   (async () => {
     await connectDB();
-    const dryRun = process.argv.includes("--dry-run");
+    // safe by default: nothing is written unless --apply is present (it is set in package.json)
+    const dryRun = !process.argv.includes("--apply");
     const result = await migrate({ dryRun });
-    console.log(dryRun ? "DRY RUN (nothing was written):" : "Done:", result);
+    console.log(dryRun ? "DRY RUN, nothing was written:" : "APPLIED:", result);
     await mongoose.disconnect();
   })().catch((err) => {
     console.error("Migration failed:", err);

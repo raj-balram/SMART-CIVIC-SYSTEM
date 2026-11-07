@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../utils/api";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
@@ -11,6 +11,8 @@ const formatDate = (iso) =>
 
 const getInitials = (name = "") =>
   name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+
+const formatHours = (h) => (h < 48 ? `${h} hours` : `${(h / 24).toFixed(1)} days`);
 
 /* ── Status config ──────────────────────────────────────────── */
 const STATUS_CONFIG = {
@@ -99,6 +101,43 @@ const CategoryChart = ({ data, total }) => {
   );
 };
 
+/* 30-day trend: reported vs resolved per day */
+const TrendChart = ({ trend = [] }) => {
+  if (trend.length === 0) return null;
+  const max = Math.max(1, ...trend.flatMap((d) => [d.created, d.resolved]));
+  const W = 600, H = 120, pad = 4;
+  const slot = W / trend.length;
+  const bar = (slot - pad) / 2;
+
+  return (
+    <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)]">Last 30 days</h3>
+        <div className="flex items-center gap-3 text-[11px] text-[var(--color-text-3)]">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500" /> Reported</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-500" /> Resolved</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-28" role="img"
+           aria-label="Complaints reported and resolved per day">
+        {trend.map((d, i) => {
+          const x = i * slot + pad / 2;
+          const hc = (d.created / max) * (H - 4);
+          const hr = (d.resolved / max) * (H - 4);
+          return (
+            <g key={d.date}>
+              <title>{`${d.date}: ${d.created} reported, ${d.resolved} resolved`}</title>
+              <rect x={x} y={H - hc} width={bar} height={hc} rx="1" className="fill-blue-500" />
+              <rect x={x + bar} y={H - hr} width={bar} height={hr} rx="1" className="fill-green-500" />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+
 /* Status action buttons: only the moves the server will accept */
 const NEXT_STATUSES = {
   Pending: ["In Progress"],
@@ -125,51 +164,102 @@ const StatusActions = ({ id, current, onUpdate }) => (
   </div>
 );
 
-/* ── Main Dashboard ─────────────────────────────────────────── */
+const PAGE_SIZE = 20;
+
 const AdminDashboard = () => {
   const { socket } = useAuth();
 
-  const [complaints, setComplaints] = useState([]);
-  const [stats, setStats]           = useState({ total: 0, pending: 0, inProgress: 0, resolved: 0, categoryCounts: [] });
-  const [loading, setLoading]       = useState(true);
-  const [newCount, setNewCount]     = useState(0);
+  const [complaints, setComplaints] = useState([]); // the CURRENT PAGE only
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0, pending: 0, inProgress: 0, resolved: 0, categoryCounts: [], avgResolutionHours: null, trend: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [newCount, setNewCount] = useState(0);
 
   // Filters
-  const [search,      setSearch]      = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
-  const [filterCat,    setFilterCat]    = useState("All");
-  const [sortBy,       setSortBy]       = useState("newest");
+  const [filterCat, setFilterCat] = useState("All");
+  const [sortBy, setSortBy] = useState("newest");
 
-  /* Fetch */
-  const fetchAll = async () => {
-    try {
-      const [cRes, sRes] = await Promise.all([
-        API.get("/complaints/all"),
-        API.get("/complaints/stats"),
-      ]);
-      setComplaints(cRes.data);
-      setStats(sRes.data);
-    } catch {
-      toast.error("Failed to load dashboard data");
-    } finally {
-      setLoading(false);
-    }
+  // wait until the admin stops typing before asking the server
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // changing a filter always goes back to page 1
+  const pick = (setter) => (e) => {
+    setter(e.target.value);
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setSearch("");
+    setDebouncedSearch("");
+    setFilterStatus("All");
+    setFilterCat("All");
+    setPage(1);
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  /* Fetch one page */
+  const latest = useRef(0); // lets us ignore a slow response that arrives after a newer one
+  const fetchList = useCallback(async () => {
+    const id = ++latest.current;
+    try {
+      const params = { page, limit: PAGE_SIZE, sort: sortBy };
+      if (filterStatus !== "All") params.status = filterStatus;
+      if (filterCat !== "All") params.category = filterCat;
+      if (debouncedSearch.length >= 2) params.q = debouncedSearch;
 
-    /* Real-time: new complaints, and status changes made by other admins */
+      const res = await API.get("/complaints/list", { params });
+      if (id !== latest.current) return;
+      setComplaints(res.data.items);
+      setTotal(res.data.total);
+      setTotalPages(res.data.totalPages);
+    } catch (err) {
+      if (id === latest.current) toast.error(err.response?.data?.message || "Failed to load complaints");
+    } finally {
+      if (id === latest.current) setLoading(false);
+    }
+  }, [page, sortBy, filterStatus, filterCat, debouncedSearch]);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      setStats((await API.get("/complaints/stats")).data);
+    } catch {
+      toast.error("Failed to load statistics");
+    }
+  }, []);
+
+  useEffect(() => { fetchList(); }, [fetchList]);
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  /* Real-time: refresh the page and the numbers; debounced so a burst causes one refresh */
+  const refreshTimer = useRef(null);
+  const refreshSoon = useCallback(() => {
+    clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      fetchList();
+      fetchStats();
+    }, 400);
+  }, [fetchList, fetchStats]);
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
   useEffect(() => {
     if (!socket) return;
-
     const onCreated = (c) => {
-      setComplaints((prev) => (prev.some((x) => x._id === c._id) ? prev : [c, ...prev]));
       setNewCount((n) => n + 1);
       toast.success(`New complaint: ${c.title}`);
+      refreshSoon();
     };
-    const onUpdated = (c) => {
-      setComplaints((prev) => prev.map((x) => (x._id === c._id ? c : x)));
-    };
+    const onUpdated = () => refreshSoon();
 
     socket.on("complaint:created", onCreated);
     socket.on("complaint:updated", onUpdated);
@@ -177,48 +267,23 @@ const AdminDashboard = () => {
       socket.off("complaint:created", onCreated);
       socket.off("complaint:updated", onUpdated);
     };
-  }, [socket]);
+  }, [socket, refreshSoon]);
 
-  /* Keep the summary cards in sync with the list */
-  useEffect(() => {
-    setStats((prev) => ({
-      ...prev,
-      total: complaints.length,
-      pending: complaints.filter((c) => c.status === "Pending").length,
-      inProgress: complaints.filter((c) => c.status === "In Progress").length,
-      resolved: complaints.filter((c) => c.status === "Resolved").length,
-    }));
-  }, [complaints]);
-  
-   /* Update status */
+  /* Update status (the note prompt becomes a proper dialog in the polish phase) */
   const updateStatus = async (id, status) => {
     const note = window.prompt(`Move to "${status}". Add a short note for the citizen (optional):`, "");
     if (note === null) return; // cancelled
     try {
-      const res = await API.put(`/complaints/${id}/status`, { status, note: note.trim().slice(0, 200) });
-      // the response is not populated, so keep the reporter's name and email we already have
-      setComplaints((prev) => prev.map((c) => (c._id === id ? { ...c, ...res.data.complaint, user: c.user } : c)));
+      await API.put(`/complaints/${id}/status`, { status, note: note.trim().slice(0, 200) });
       toast.success("Status updated");
     } catch (err) {
       toast.error(err.response?.data?.message || "Failed to update status");
     }
+    fetchList();
+    fetchStats();
   };
 
-  /* Filtered + sorted list */
-  const filtered = useMemo(() => {
-    let list = [...complaints];
-    if (filterStatus !== "All") list = list.filter((c) => c.status === filterStatus);
-    if (filterCat    !== "All") list = list.filter((c) => c.category === filterCat);
-    if (search.trim())
-      list = list.filter((c) =>
-        c.title.toLowerCase().includes(search.toLowerCase()) ||
-        c.user?.name?.toLowerCase().includes(search.toLowerCase())
-      );
-    if (sortBy === "newest") list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    if (sortBy === "oldest") list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    if (sortBy === "status") list.sort((a, b) => a.status.localeCompare(b.status));
-    return list;
-  }, [complaints, filterStatus, filterCat, search, sortBy]);
+  const filtered = complaints; // the server already filtered, sorted and paged it
 
   /* ── Render ── */
   return (
@@ -308,6 +373,11 @@ const AdminDashboard = () => {
                   <span className="text-2xl text-[var(--color-text-3)]">%</span>
                 </p>
                 <p className="text-xs text-[var(--color-text-3)] mt-2">of all complaints resolved</p>
+                                {stats.avgResolutionHours != null && (
+                  <p className="text-[11px] text-[var(--color-text-3)] mt-1">
+                    Average resolution time: {formatHours(stats.avgResolutionHours)}
+                  </p>
+                )}
               </div>
 
               {/* Progress bar */}
@@ -330,6 +400,8 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      <TrendChart trend={stats.trend} />
+
       {/* ── Complaints table ── */}
       <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)]">
 
@@ -337,7 +409,7 @@ const AdminDashboard = () => {
         <div className="px-5 py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-[var(--color-text-1)]">All complaints</h3>
-            <p className="text-xs text-[var(--color-text-3)] mt-0.5">{filtered.length} shown</p>
+            <p className="text-xs text-[var(--color-text-3)] mt-0.5">{total} match</p>
           </div>
 
           {/* Search */}
@@ -347,7 +419,7 @@ const AdminDashboard = () => {
             </svg>
             <input
               type="text"
-              placeholder="Search title or user…"
+              placeholder="Search whole words in title or description…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 pr-3 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15 transition-all w-44"
@@ -357,7 +429,7 @@ const AdminDashboard = () => {
           {/* Status filter */}
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            onChange={pick(setFilterStatus)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="All">All statuses</option>
@@ -369,7 +441,7 @@ const AdminDashboard = () => {
           {/* Category filter */}
           <select
             value={filterCat}
-            onChange={(e) => setFilterCat(e.target.value)}
+            onChange={pick(setFilterCat)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="All">All categories</option>
@@ -383,7 +455,7 @@ const AdminDashboard = () => {
           {/* Sort */}
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={pick(setSortBy)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="newest">Newest first</option>
@@ -495,20 +567,36 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Table footer */}
-        {!loading && filtered.length > 0 && (
-          <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between">
+        {/* Table footer + pager */}
+        {!loading && total > 0 && (
+          <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-[var(--color-text-3)]">
-              Showing {filtered.length} of {complaints.length} complaints
+              Page {page} of {totalPages} · {total} complaint{total !== 1 ? "s" : ""}
             </p>
-            {(search || filterStatus !== "All" || filterCat !== "All") && (
+            <div className="flex items-center gap-2">
+              {(search || filterStatus !== "All" || filterCat !== "All") && (
+                <button
+                  onClick={clearFilters}
+                  className="text-xs text-[var(--color-accent)] hover:underline bg-transparent border-none cursor-pointer"
+                >
+                  Clear filters
+                </button>
+              )}
               <button
-                onClick={() => { setSearch(""); setFilterStatus("All"); setFilterCat("All"); }}
-                className="text-xs text-[var(--color-accent)] hover:underline bg-transparent border-none cursor-pointer"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1 text-xs rounded-md border border-[var(--color-border)] bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Clear filters
+                Previous
               </button>
-            )}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-3 py-1 text-xs rounded-md border border-[var(--color-border)] bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

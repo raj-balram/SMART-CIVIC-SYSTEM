@@ -72,6 +72,32 @@ const nearbyQuerySchema = z.object({
   category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
 });
 
+const SORTS = ["newest", "oldest", "status"];
+
+// query-string numbers arrive as text
+const intParam = (label, min, max, fallback) =>
+  z
+    .string()
+    .trim()
+    .default(String(fallback))
+    .refine((v) => /^\d+$/.test(v), `${label} must be a whole number`)
+    .transform(Number)
+    .pipe(
+      z
+        .number()
+        .min(min, `${label} must be between ${min} and ${max}`)
+        .max(max, `${label} must be between ${min} and ${max}`)
+    );
+
+const adminListQuerySchema = z.object({
+  page: intParam("Page", 1, 100000, 1),
+  limit: intParam("Limit", 1, 100, 20),
+  status: z.enum(STATUSES, { message: `Status must be one of: ${STATUSES.join(", ")}` }).optional(),
+  category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
+  sort: z.enum(SORTS, { message: `Sort must be one of: ${SORTS.join(", ")}` }).default("newest"),
+  q: z.string().trim().min(2, "Search must be at least 2 characters").max(100, "Search must be 100 characters or fewer").optional(),
+});
+
 module.exports = {
   CATEGORIES,
   STATUSES,
@@ -81,4 +107,5 @@ module.exports = {
   createComplaintSchema,
   updateStatusSchema,
   nearbyQuerySchema,
+  adminListQuerySchema,
 };

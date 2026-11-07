@@ -22,6 +22,9 @@ async function main() {
   await show("Category + status", Complaint.find({ category: "Road", status: "Resolved" }));
   await show("For contrast: search by title text (no index)", Complaint.find({ title: /pothole/i }));
 
+  await show("Admin list page 1 (all statuses, newest)", Complaint.find().sort({ createdAt: -1, _id: -1 }).limit(20));
+  await show("Admin list, Pending, newest", Complaint.find({ status: "Pending" }).sort({ createdAt: -1, _id: -1 }).limit(20));
+  await show("Admin search (text index)", Complaint.find({ $text: { $search: "pothole" } }).limit(20));
   await mongoose.disconnect();
 }
 

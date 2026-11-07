@@ -38,9 +38,14 @@ const complaintSchema = new mongoose.Schema(
 );
 
 complaintSchema.index({ user: 1, createdAt: -1 }); // "my complaints", newest first
-complaintSchema.index({ status: 1, createdAt: -1 }); // admin list filtered by status
-complaintSchema.index({ category: 1, status: 1 }); // category analytics
-complaintSchema.index({ createdAt: -1 }); // unfiltered admin list
+complaintSchema.index({ status: 1, createdAt: -1, _id: -1 }); // admin list by status; _id makes paging stable without an in-memory sort
+complaintSchema.index({ category: 1, status: 1 }); // category filters and analytics
+complaintSchema.index({ createdAt: -1, _id: -1 }); // unfiltered admin list
+complaintSchema.index({ resolvedAt: 1 }); // resolution statistics
 complaintSchema.index({ geo: "2dsphere" }); // nearby search
+complaintSchema.index(
+  { title: "text", description: "text" },
+  { weights: { title: 5, description: 1 }, name: "complaint_text" } // title matches count more
+);
 
 module.exports = mongoose.model("Complaint", complaintSchema);

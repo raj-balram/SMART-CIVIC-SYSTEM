@@ -33,13 +33,20 @@ exports.createComplaint = async (req, res) => {
   res.status(201).json(complaint);
 };
 
+// my complaints (capped so the response can never grow without limit)
 exports.getComplaints = async (req, res) => {
-  const complaints = await Complaint.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
+  const complaints = await Complaint.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(500).lean();
   res.json(complaints.map(toCitizenView));
 };
 
+// used by the admin map; capped, and replaced by a light, clustered endpoint in a later phase
 exports.getAllComplaintAdmin = async (req, res) => {
-  res.json(await Complaint.find().populate("user", "name email").sort({ createdAt: -1 }));
+  res.json(await Complaint.find().populate("user", "name email").sort({ createdAt: -1 }).limit(1000));
+};
+
+// the dashboard table: paginated, filtered, searched and sorted by the database
+exports.listComplaints = async (req, res) => {
+  res.json(await complaintService.listForAdmin(req.validatedQuery));
 };
 
 exports.updateStatus = async (req, res) => {
@@ -59,13 +66,5 @@ exports.getNearby = async (req, res) => {
 };
 
 exports.getStats = async (req, res) => {
-  const [total, pending, inProgress, resolved, categoryCounts] = await Promise.all([
-    Complaint.countDocuments(),
-    Complaint.countDocuments({ status: "Pending" }),
-    Complaint.countDocuments({ status: "In Progress" }),
-    Complaint.countDocuments({ status: "Resolved" }),
-    Complaint.aggregate([{ $group: { _id: "$category", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
-  ]);
-
-  res.json({ total, pending, inProgress, resolved, categoryCounts });
+  res.json(await complaintService.getStats());
 };
