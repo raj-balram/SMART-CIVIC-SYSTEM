@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const app = require("./app");
 const connectDB = require("./config/db");
 const { initSocket } = require("./socket");
+const { startSlaJob } = require("./jobs/slaEscalation");
 
 const server = http.createServer(app);
 const io = initSocket(server);
@@ -12,6 +13,7 @@ app.set("io", io);
 async function start() {
   await connectDB();
   server.listen(env.PORT, () => console.log(`Server running on port ${env.PORT}`));
+  const stopSla = startSlaJob(io, env.SLA_INTERVAL_MS);
 
   let shuttingDown = false;
   const shutdown = (signal) => {
@@ -19,6 +21,7 @@ async function start() {
     shuttingDown = true;
     console.log(`${signal} received: shutting down`);
     setTimeout(() => process.exit(1), 10_000).unref(); // never hang a deploy
+    stopSla();
     io.close(async () => {
       // io.close also closes the HTTP server
       await mongoose.disconnect();

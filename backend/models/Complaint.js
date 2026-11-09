@@ -40,6 +40,8 @@ const complaintSchema = new mongoose.Schema(
       select: false,
     },
     supportCount: { type: Number, default: 0, min: 0 },
+    dueAt: { type: Date, default: null }, // target date to resolve it, from the category's SLA
+    escalatedAt: { type: Date, default: null }, // when the system first flagged it as overdue
   },
   { timestamps: true }
 );
@@ -55,5 +57,7 @@ complaintSchema.index(
   { weights: { title: 5, description: 1 }, name: "complaint_text" } // title matches count more
 );
 complaintSchema.index({ supportCount: -1, createdAt: -1, _id: -1 }); // "most supported" sort
+complaintSchema.index({ status: 1, dueAt: 1 }); // overdue queries and the SLA job
+
 
 module.exports = mongoose.model("Complaint", complaintSchema);

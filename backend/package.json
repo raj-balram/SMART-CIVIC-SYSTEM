@@ -13,7 +13,10 @@
     "explain": "node scripts/explain-indexes.js",
     "migrate:phase3": "node scripts/migrate-phase3.js --apply",
     "migrate:phase3:dry": "node scripts/migrate-phase3.js",
-    "sync-indexes": "node scripts/sync-indexes.js"
+    "sync-indexes": "node scripts/sync-indexes.js",
+    "migrate:phase5": "node scripts/migrate-phase5.js --apply",
+    "migrate:phase5:dry": "node scripts/migrate-phase5.js",
+    "demo:overdue": "node scripts/make-overdue.js"
   },
   "keywords": [],
   "author": "",

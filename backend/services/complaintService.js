@@ -1,6 +1,6 @@
 const Complaint = require("../models/Complaint");
 const AppError = require("../utils/AppError");
-const { allowedFrom, toGeoPoint } = require("../utils/workflow");
+const { allowedFrom, dueAtFor, toGeoPoint, OPEN_STATUSES } = require("../utils/workflow");
 
 const TIMEZONE = "Asia/Kolkata"; // the city this app serves: statistics days follow it
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -26,6 +26,8 @@ async function create({ user, title, description, category, image, lat, lng }) {
     status: "Pending",
     statusHistory: [{ status: "Pending", by: user, at: new Date(), note: "" }],
     resolvedAt: null,
+    dueAt: dueAtFor(category),
+    escalatedAt: null,
   });
 }
 
@@ -134,11 +136,17 @@ async function findNearby({ lat, lng, radius, category }, viewerId) {
 }
 
 // One page of complaints for the admin dashboard: the database filters, searches, sorts and pages.
-async function listForAdmin({ page, limit, status, category, q, sort }) {
+async function listForAdmin({ page, limit, status, category, q, sort, overdue }) {
   const filter = {};
   if (status) filter.status = status;
   if (category) filter.category = category;
   if (q) filter.$text = { $search: q }; // uses the text index
+
+  if (overdue) {
+    // overdue = still open AND past its target date
+    filter.dueAt = { $lt: new Date() };
+    filter.status = status ? (OPEN_STATUSES.includes(status) ? status : { $in: [] }) : { $in: OPEN_STATUSES };
+  }
 
   const [items, total] = await Promise.all([
     Complaint.find(filter)
@@ -169,7 +177,7 @@ async function getStats() {
     },
   ];
 
-  const [byStatus, categoryCounts, resolution, created, resolved] = await Promise.all([
+  const [byStatus, categoryCounts, resolution, created, resolved, overdue] = await Promise.all([
     Complaint.aggregate([{ $group: { _id: "$status", count: { $sum: 1 } } }]),
     Complaint.aggregate([{ $group: { _id: "$category", count: { $sum: 1 } } }, { $sort: { count: -1 } }]),
     Complaint.aggregate([
@@ -178,6 +186,7 @@ async function getStats() {
     ]),
     Complaint.aggregate(perDay("createdAt")),
     Complaint.aggregate(perDay("resolvedAt")),
+    Complaint.countDocuments({ status: { $in: OPEN_STATUSES }, dueAt: { $lt: new Date() } }),
   ]);
 
   const countOf = (status) => byStatus.find((s) => s._id === status)?.count ?? 0;
@@ -202,6 +211,7 @@ async function getStats() {
     categoryCounts,
     avgResolutionHours: avgMs == null ? null : Math.round((avgMs / 3_600_000) * 10) / 10,
     trend,
+    overdue,
   };
 }
 

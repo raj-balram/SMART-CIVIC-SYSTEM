@@ -4,7 +4,7 @@ const bcrypt = require("bcryptjs");
 const connectDB = require("../config/db");
 const User = require("../models/User");
 const Complaint = require("../models/Complaint");
-const { toGeoPoint } = require("../utils/workflow");
+const { toGeoPoint, SLA_HOURS } = require("../utils/workflow");
 
 // Safety: never seed a remote (production) database by accident
 if (!/127\.0\.0\.1|localhost/.test(env.MONGO_URI) && process.env.ALLOW_REMOTE_SEED !== "1") {
@@ -119,6 +119,9 @@ async function main() {
         ? []
         : citizens.filter((c) => String(c._id) !== String(owner) && rand() < 0.25).map((c) => c._id);
 
+    const dueAt = new Date(createdAt.getTime() + SLA_HOURS[category] * 3_600_000);
+    const escalatedAt = status !== "Resolved" && dueAt.getTime() < now ? new Date(dueAt.getTime() + 600_000) : null;
+    
     docs.push({
       user: owner,
       title,
@@ -132,6 +135,7 @@ async function main() {
       resolvedAt: status === "Resolved" ? updatedAt : null,
       supporters,
       supportCount: supporters.length,
+      dueAt, escalatedAt,
       createdAt,
       updatedAt,
       __v: 0,

@@ -14,4 +14,12 @@ const allowedFrom = (to) => STATUSES.filter((from) => TRANSITIONS[from].includes
 // GeoJSON stores LONGITUDE first, then latitude
 const toGeoPoint = (lat, lng) => ({ type: "Point", coordinates: [lng, lat] });
 
-module.exports = { CATEGORIES, STATUSES, TRANSITIONS, allowedFrom, toGeoPoint };
+const OPEN_STATUSES = ["Pending", "In Progress"];
+
+// hours a complaint may stay open before it counts as overdue, by category
+const SLA_HOURS = { Road: 72, Garbage: 24, Electricity: 24, Water: 24, Other: 120 };
+
+const dueAtFor = (category, from = new Date()) =>
+  new Date(from.getTime() + SLA_HOURS[category] * 60 * 60 * 1000);
+
+module.exports = { CATEGORIES, STATUSES, TRANSITIONS, OPEN_STATUSES, SLA_HOURS, allowedFrom, dueAtFor, toGeoPoint };

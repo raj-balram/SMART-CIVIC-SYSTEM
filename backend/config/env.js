@@ -12,6 +12,7 @@ const schema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().min(1),
   CLOUDINARY_API_KEY: z.string().min(1),
   CLOUDINARY_API_SECRET: z.string().min(1),
+  SLA_INTERVAL_MS: z.coerce.number().int().min(1000).default(5 * 60 * 1000),
 });
 
 const parsed = schema.safeParse(process.env);

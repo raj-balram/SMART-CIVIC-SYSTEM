@@ -14,6 +14,13 @@ const getInitials = (name = "") =>
 
 const formatHours = (h) => (h < 48 ? `${h} hours` : `${(h / 24).toFixed(1)} days`);
 
+const isOverdue = (c) => c.status !== "Resolved" && c.dueAt && new Date(c.dueAt) < new Date();
+const overdueFor = (c) => {
+  const h = Math.floor((Date.now() - new Date(c.dueAt)) / 3_600_000);
+  return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
+};
+
+
 /* ── Status config ──────────────────────────────────────────── */
 const STATUS_CONFIG = {
   Pending:      { pill: "bg-amber-50 text-amber-700 border border-amber-200",    dot: "bg-amber-500"  },
@@ -185,6 +192,7 @@ const AdminDashboard = () => {
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterCat, setFilterCat] = useState("All");
   const [sortBy, setSortBy] = useState("newest");
+  const [overdueOnly, setOverdueOnly] = useState(false);
 
   // wait until the admin stops typing before asking the server
   useEffect(() => {
@@ -206,6 +214,7 @@ const AdminDashboard = () => {
     setFilterStatus("All");
     setFilterCat("All");
     setPage(1);
+    setOverdueOnly(false);
   };
 
   /* Fetch one page */
@@ -217,6 +226,7 @@ const AdminDashboard = () => {
       if (filterStatus !== "All") params.status = filterStatus;
       if (filterCat !== "All") params.category = filterCat;
       if (debouncedSearch.length >= 2) params.q = debouncedSearch;
+      if (overdueOnly) params.overdue = "true";
 
       const res = await API.get("/complaints/list", { params });
       if (id !== latest.current) return;
@@ -228,7 +238,7 @@ const AdminDashboard = () => {
     } finally {
       if (id === latest.current) setLoading(false);
     }
-  }, [page, sortBy, filterStatus, filterCat, debouncedSearch]);
+  }, [page, sortBy, filterStatus, filterCat, debouncedSearch, overdueOnly]);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -252,7 +262,7 @@ const AdminDashboard = () => {
   }, [fetchList, fetchStats]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
-  useEffect(() => {
+    useEffect(() => {
     if (!socket) return;
     const onCreated = (c) => {
       setNewCount((n) => n + 1);
@@ -260,14 +270,20 @@ const AdminDashboard = () => {
       refreshSoon();
     };
     const onChanged = () => refreshSoon();
+    const onOverdue = (p) => {
+      toast.error(`${p.count} complaint${p.count !== 1 ? "s" : ""} just became overdue`);
+      refreshSoon();
+    };
 
     socket.on("complaint:created", onCreated);
     socket.on("complaint:updated", onChanged);
     socket.on("complaint:supported", onChanged);
+    socket.on("complaint:overdue", onOverdue);
     return () => {
       socket.off("complaint:created", onCreated);
       socket.off("complaint:updated", onChanged);
       socket.off("complaint:supported", onChanged);
+      socket.off("complaint:overdue", onOverdue);
     };
   }, [socket, refreshSoon]);
 
@@ -378,6 +394,9 @@ const AdminDashboard = () => {
                                 {stats.avgResolutionHours != null && (
                   <p className="text-[11px] text-[var(--color-text-3)] mt-1">
                     Average resolution time: {formatHours(stats.avgResolutionHours)}
+                    {stats.overdue > 0 && (
+                    <p className="text-[11px] text-red-600 mt-1 font-medium">⚠ {stats.overdue} overdue</p>
+                    )}
                   </p>
                 )}
               </div>
@@ -465,6 +484,15 @@ const AdminDashboard = () => {
             <option value="status">By status</option>
             <option value="support">Most supported</option>
           </select>
+
+          <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-2)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={overdueOnly}
+              onChange={(e) => { setOverdueOnly(e.target.checked); setPage(1); }}
+            />
+            Overdue only
+          </label>
         </div>
 
         {/* Loading skeleton */}
@@ -548,9 +576,16 @@ const AdminDashboard = () => {
 
                     {/* Status */}
                     <td className="px-4 py-3.5">
-                      <StatusBadge status={c.status} />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <StatusBadge status={c.status} />
+                        {isOverdue(c) && (
+                          <span className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+                            Overdue {overdueFor(c)}
+                          </span>
+                        )}
+                      </div>
                     </td>
-                    
+
                     {/* Supporters */}
                     <td className="px-4 py-3.5 text-xs font-mono text-[var(--color-text-2)]">
                       {c.supportCount ?? 0}
@@ -583,7 +618,7 @@ const AdminDashboard = () => {
               Page {page} of {totalPages} · {total} complaint{total !== 1 ? "s" : ""}
             </p>
             <div className="flex items-center gap-2">
-              {(search || filterStatus !== "All" || filterCat !== "All") && (
+              {(search || filterStatus !== "All" || filterCat !== "All" || overdueOnly) && (
                 <button
                   onClick={clearFilters}
                   className="text-xs text-[var(--color-accent)] hover:underline bg-transparent border-none cursor-pointer"

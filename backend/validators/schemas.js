@@ -95,6 +95,7 @@ const adminListQuerySchema = z.object({
   status: z.enum(STATUSES, { message: `Status must be one of: ${STATUSES.join(", ")}` }).optional(),
   category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
   sort: z.enum(SORTS, { message: `Sort must be one of: ${SORTS.join(", ")}` }).default("newest"),
+  overdue: z.enum(["true", "false"], { message: "overdue must be true or false" }).default("false").transform((v) => v === "true"),
   q: z.string().trim().min(2, "Search must be at least 2 characters").max(100, "Search must be 100 characters or fewer").optional(),
 });
 

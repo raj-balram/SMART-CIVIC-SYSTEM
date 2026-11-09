@@ -257,12 +257,20 @@ const MapView = () => {
                           By {c.user.name}
                         </p>
                       )}
-                      
+
+                      {c.dueAt && c.status !== "Resolved" && (
+                        <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
+                          🎯 Target: resolve by {new Date(c.dueAt).toLocaleDateString()}
+                        </p>
+                      )}
+
                       {c.supportCount > 0 && (
                         <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
                           👥 {c.supportCount} {c.supportCount === 1 ? "person supports" : "people support"} this
                         </p>
                       )}
+
+
                       
                       {/* Progress timeline */}
                       {Array.isArray(c.statusHistory) && c.statusHistory.length > 0 && (
