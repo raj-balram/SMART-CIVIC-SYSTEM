@@ -3,7 +3,7 @@ const protect = require("../middlewares/authMiddleware");
 const requireRole = require("../middlewares/requireRole");
 const { upload, verifyImage } = require("../middlewares/upload");
 const { validateBody, validateQuery, validateObjectId } = require("../middlewares/validate");
-const { createComplaintLimiter } = require("../middlewares/rateLimit");
+const { createComplaintLimiter, supportLimiter } = require("../middlewares/rateLimit");
 const {
   createComplaintSchema,
   updateStatusSchema,
@@ -17,6 +17,8 @@ const {
   listComplaints,
   updateStatus,
   getNearby,
+  supportComplaint,
+  unsupportComplaint,
   getStats,
 } = require("../controllers/complaintController");
 
@@ -37,6 +39,8 @@ router.get("/nearby", validateQuery(nearbyQuerySchema), getNearby);
 router.get("/list", requireRole("admin"), validateQuery(adminListQuerySchema), listComplaints);
 router.get("/all", requireRole("admin"), getAllComplaintAdmin);
 router.get("/stats", requireRole("admin"), getStats);
+router.post("/:id/support", supportLimiter, validateObjectId("id"), supportComplaint);
+router.delete("/:id/support", supportLimiter, validateObjectId("id"), unsupportComplaint);
 router.put("/:id/status", requireRole("admin"), validateObjectId("id"), validateBody(updateStatusSchema), updateStatus);
 
 module.exports = router;

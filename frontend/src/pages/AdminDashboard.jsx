@@ -259,13 +259,15 @@ const AdminDashboard = () => {
       toast.success(`New complaint: ${c.title}`);
       refreshSoon();
     };
-    const onUpdated = () => refreshSoon();
+    const onChanged = () => refreshSoon();
 
     socket.on("complaint:created", onCreated);
-    socket.on("complaint:updated", onUpdated);
+    socket.on("complaint:updated", onChanged);
+    socket.on("complaint:supported", onChanged);
     return () => {
       socket.off("complaint:created", onCreated);
-      socket.off("complaint:updated", onUpdated);
+      socket.off("complaint:updated", onChanged);
+      socket.off("complaint:supported", onChanged);
     };
   }, [socket, refreshSoon]);
 
@@ -461,6 +463,7 @@ const AdminDashboard = () => {
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="status">By status</option>
+            <option value="support">Most supported</option>
           </select>
         </div>
 
@@ -497,6 +500,7 @@ const AdminDashboard = () => {
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Submitted by</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Category</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Status</th>
+                  <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Supporters</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3 hidden md:table-cell">Date</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Actions</th>
                 </tr>
@@ -545,6 +549,11 @@ const AdminDashboard = () => {
                     {/* Status */}
                     <td className="px-4 py-3.5">
                       <StatusBadge status={c.status} />
+                    </td>
+                    
+                    {/* Supporters */}
+                    <td className="px-4 py-3.5 text-xs font-mono text-[var(--color-text-2)]">
+                      {c.supportCount ?? 0}
                     </td>
 
                     {/* Date */}

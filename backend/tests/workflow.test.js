@@ -200,9 +200,10 @@ describe("nearby search", () => {
 
   test("exposes only non-identifying fields", async () => {
     const res = await nearby({ lat: 10, lng: 76, radius: 300 });
-    expect(Object.keys(res.body[0]).sort()).toEqual(
-      ["_id", "category", "createdAt", "distanceMeters", "location", "status", "title"]
-    );
+    expect(Object.keys(res.body[0]).sort()).toEqual([
+      "_id", "category", "createdAt", "distanceMeters", "isMine",
+      "location", "status", "supportCount", "supportedByMe", "title",
+    ]);
   });
 
   test("can filter by category", async () => {

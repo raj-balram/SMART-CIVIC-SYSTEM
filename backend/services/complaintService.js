@@ -11,6 +11,7 @@ const SORT_ORDERS = {
   newest: { createdAt: -1, _id: -1 },
   oldest: { createdAt: 1, _id: 1 },
   status: { status: 1, createdAt: -1, _id: -1 },
+  support: { supportCount: -1, createdAt: -1, _id: -1 },
 };
 
 async function create({ user, title, description, category, image, lat, lng }) {
@@ -52,8 +53,56 @@ async function changeStatus({ id, to, adminId, note }) {
   );
 }
 
-// Open complaints near a point, nearest first. Returns only non-identifying fields.
-async function findNearby({ lat, lng, radius, category }) {
+// "Me too". ONE atomic write: the filter only matches if the user is not already a supporter,
+// so the counter can never be incremented twice for the same person, however many requests arrive.
+async function addSupport({ id, userId }) {
+  const updated = await Complaint.findOneAndUpdate(
+    { _id: id, status: { $ne: "Resolved" }, user: { $ne: userId }, supporters: { $ne: userId } },
+    { $addToSet: { supporters: userId }, $inc: { supportCount: 1 } },
+    { returnDocument: "after" }
+  );
+  if (updated) {
+    return {
+      supportCount: updated.supportCount,
+      supportedByMe: true,
+      changed: true,
+      complaint: { _id: updated._id, title: updated.title, user: updated.user, supportCount: updated.supportCount },
+    };
+  }
+  return supportMiss({ id, userId, adding: true });
+}
+
+async function removeSupport({ id, userId }) {
+  const updated = await Complaint.findOneAndUpdate(
+    { _id: id, supporters: userId },
+    { $pull: { supporters: userId }, $inc: { supportCount: -1 } },
+    { returnDocument: "after" }
+  );
+  if (updated) return { supportCount: updated.supportCount, supportedByMe: false, changed: true };
+  return supportMiss({ id, userId, adding: false });
+}
+
+// The atomic write did not match: work out why, and make repeated requests harmless.
+async function supportMiss({ id, userId, adding }) {
+  const current = await Complaint.findById(id).select("status user supportCount").lean();
+  if (!current) throw new AppError(404, "Complaint not found");
+
+  const supports = Boolean(await Complaint.exists({ _id: id, supporters: userId }));
+  const result = { supportCount: current.supportCount ?? 0, supportedByMe: supports, changed: false };
+
+  if (adding) {
+    if (String(current.user) === String(userId)) throw new AppError(400, "You cannot support your own complaint");
+    if (current.status === "Resolved") throw new AppError(409, "This complaint is already resolved");
+    if (supports) return result; // already supporting: repeating the request is harmless
+  } else if (!supports) {
+    return result; // nothing to remove
+  }
+  throw new AppError(409, "Please try again");
+}
+
+// Open complaints near a point, nearest first. Non-identifying fields only,
+// plus what the viewer needs to act on them.
+async function findNearby({ lat, lng, radius, category }, viewerId) {
   const query = { status: { $ne: "Resolved" } };
   if (category) query.category = category;
 
@@ -76,6 +125,9 @@ async function findNearby({ lat, lng, radius, category }) {
         location: 1,
         createdAt: 1,
         distanceMeters: { $round: ["$distanceMeters", 0] },
+        supportCount: { $ifNull: ["$supportCount", 0] },
+        supportedByMe: { $in: [viewerId, { $ifNull: ["$supporters", []] }] },
+        isMine: { $eq: ["$user", viewerId] },
       },
     },
   ]);
@@ -153,13 +205,23 @@ async function getStats() {
   };
 }
 
-// What a citizen may see: everything except which admin made each change.
+// What a citizen may see: no admin identities, and never the list of supporters.
 function toCitizenView(complaint) {
   const obj = typeof complaint.toObject === "function" ? complaint.toObject() : { ...complaint };
+  delete obj.supporters;
   if (Array.isArray(obj.statusHistory)) {
     obj.statusHistory = obj.statusHistory.map(({ by, ...rest }) => rest);
   }
   return obj;
 }
 
-module.exports = { create, changeStatus, findNearby, listForAdmin, getStats, toCitizenView };
+module.exports = {
+  create,
+  changeStatus,
+  addSupport,
+  removeSupport,
+  findNearby,
+  listForAdmin,
+  getStats,
+  toCitizenView,
+};

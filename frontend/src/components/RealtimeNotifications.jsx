@@ -15,8 +15,20 @@ const RealtimeNotifications = () => {
       toast.success(`Your complaint "${c.title}" is now ${c.status}${note ? `: ${note}` : ""}`);
     };
 
+    // citizens only ever receive this for their OWN complaints (the server sends it to the owner's room)
+    const onSupported = (c) => {
+      if (user.role === "admin") return;
+      toast.success(
+        `${c.supportCount} ${c.supportCount === 1 ? "person supports" : "people support"} your complaint "${c.title}"`
+      );
+    };
+
     socket.on("complaint:updated", onUpdated);
-    return () => socket.off("complaint:updated", onUpdated);
+    socket.on("complaint:supported", onSupported);
+    return () => {
+      socket.off("complaint:updated", onUpdated);
+      socket.off("complaint:supported", onSupported);
+    };
   }, [socket, user]);
 
   return null;

@@ -1,5 +1,5 @@
 const Complaint = require("../models/Complaint");
-const { rooms } = require("./events");
+const { EVENTS, rooms } = require("./events");
 const { toCitizenView } = require("../services/complaintService");
 
 async function notifyComplaint(io, event, complaintId, ownerId) {
@@ -12,4 +12,14 @@ async function notifyComplaint(io, event, complaintId, ownerId) {
   io.to(rooms.user(ownerId)).except(rooms.admin).emit(event, toCitizenView(full));
 }
 
-module.exports = { notifyComplaint };
+// only the count is sent, never who supports a complaint
+function notifySupport(io, complaint) {
+  if (!io) return;
+  io.to(rooms.admin).to(rooms.user(complaint.user)).emit(EVENTS.COMPLAINT_SUPPORTED, {
+    _id: complaint._id,
+    title: complaint.title,
+    supportCount: complaint.supportCount,
+  });
+}
+
+module.exports = { notifyComplaint, notifySupport };

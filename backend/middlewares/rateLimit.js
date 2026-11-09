@@ -19,4 +19,5 @@ module.exports = {
   registerLimiter: build(60 * 60 * 1000, 10), // per IP
   // per logged-in user, so a spammer is limited but everyone else is not
   createComplaintLimiter: build(60 * 60 * 1000, 10, { keyGenerator: (req) => req.user._id.toString() }),
+  supportLimiter: build(60 * 60 * 1000, 60, { keyGenerator: (req) => req.user._id.toString() }),
 };

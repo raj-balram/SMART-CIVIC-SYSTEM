@@ -258,6 +258,12 @@ const MapView = () => {
                         </p>
                       )}
                       
+                      {c.supportCount > 0 && (
+                        <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
+                          👥 {c.supportCount} {c.supportCount === 1 ? "person supports" : "people support"} this
+                        </p>
+                      )}
+                      
                       {/* Progress timeline */}
                       {Array.isArray(c.statusHistory) && c.statusHistory.length > 0 && (
                         <div style={{ marginTop: 8, borderTop: "1px solid #eef0f3", paddingTop: 6 }}>

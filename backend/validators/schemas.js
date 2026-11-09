@@ -72,7 +72,7 @@ const nearbyQuerySchema = z.object({
   category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
 });
 
-const SORTS = ["newest", "oldest", "status"];
+const SORTS = ["newest", "oldest", "status", "support"];
 
 // query-string numbers arrive as text
 const intParam = (label, min, max, fallback) =>

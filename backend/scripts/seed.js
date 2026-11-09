@@ -89,7 +89,7 @@ async function main() {
     );
   }
 
-    const now = Date.now();
+  const now = Date.now();
   const docs = [];
   for (let i = 0; i < COUNT; i++) {
     const category = weighted([["Road", 0.3], ["Garbage", 0.25], ["Water", 0.2], ["Electricity", 0.15], ["Other", 0.1]]);
@@ -113,6 +113,12 @@ async function main() {
     }
     if (status !== "Pending") statusHistory.push({ status, by: adminUser._id, at: updatedAt, note: "" });
 
+        // a few citizens (never the owner) support some open complaints
+    const supporters =
+      status === "Resolved"
+        ? []
+        : citizens.filter((c) => String(c._id) !== String(owner) && rand() < 0.25).map((c) => c._id);
+
     docs.push({
       user: owner,
       title,
@@ -124,6 +130,8 @@ async function main() {
       status,
       statusHistory,
       resolvedAt: status === "Resolved" ? updatedAt : null,
+      supporters,
+      supportCount: supporters.length,
       createdAt,
       updatedAt,
       __v: 0,

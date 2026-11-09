@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Map from "../components/Map";
 import API from "../utils/api";
 import toast from "react-hot-toast";
@@ -12,6 +12,43 @@ const ComplaintForm = () => {
   const [preview, setPreview] = useState(null);
   const [location, setLocation] = useState(null);
   const [loading, setLoading]   = useState(false);
+  const [similar, setSimilar] = useState([]);
+  const [supporting, setSupporting] = useState(null);
+
+    /* Look for open complaints within 150 m in the same category (waits until you stop changing things) */
+  useEffect(() => {
+    if (!location) return;
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const res = await API.get("/complaints/nearby", {
+          params: { lat: location.lat, lng: location.lng, category: form.category, radius: 150 },
+        });
+        if (!cancelled) setSimilar(res.data);
+      } catch {
+        if (!cancelled) setSimilar([]);
+      }
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [location, form.category]);
+
+  const toggleSupport = async (c) => {
+    setSupporting(c._id);
+    try {
+      const res = c.supportedByMe
+        ? await API.delete(`/complaints/${c._id}/support`)
+        : await API.post(`/complaints/${c._id}/support`);
+      setSimilar((list) => list.map((x) => (x._id === c._id ? { ...x, ...res.data } : x)));
+      toast.success(res.data.supportedByMe ? "Thanks! Your support was added." : "Support removed");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Could not update your support");
+    } finally {
+      setSupporting(null);
+    }
+  };
 
 
   const handleImage = (file) => {
@@ -151,6 +188,51 @@ const ComplaintForm = () => {
             </div>
           </div>
         </div>
+
+                {/* ── Similar complaints nearby ── */}
+        {similar.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-5 space-y-3">
+            <div>
+              <h2 className="text-sm font-semibold text-amber-900">Already reported nearby?</h2>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Supporting an existing complaint helps the authorities prioritise it. If yours is
+                different, just continue below.
+              </p>
+            </div>
+            <ul className="space-y-2">
+              {similar.map((c) => (
+                <li
+                  key={c._id}
+                  className="bg-white border border-amber-200 rounded-lg px-3 py-2.5 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--color-text-1)] truncate">{c.title}</p>
+                    <p className="text-[11px] text-[var(--color-text-3)]">
+                      {c.status} · about {c.distanceMeters} m away · {c.supportCount} supporter
+                      {c.supportCount !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  {c.isMine ? (
+                    <span className="text-[11px] text-[var(--color-text-3)] shrink-0">Your complaint</span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={supporting === c._id}
+                      onClick={() => toggleSupport(c)}
+                      className={`shrink-0 px-3 py-1.5 rounded-md text-xs font-medium border cursor-pointer disabled:opacity-50 ${
+                        c.supportedByMe
+                          ? "bg-green-50 text-green-700 border-green-200"
+                          : "bg-white text-[var(--color-navy)] border-[var(--color-navy)] hover:bg-[var(--color-surface-2)]"
+                      }`}
+                    >
+                      {c.supportedByMe ? "✓ Supported (undo)" : "Me too"}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* ── Image upload card ── */}
         <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-6">

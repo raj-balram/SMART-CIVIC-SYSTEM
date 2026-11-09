@@ -3,7 +3,7 @@ const streamUpload = require("../utils/cloudinaryUpload");
 const AppError = require("../utils/AppError");
 const complaintService = require("../services/complaintService");
 const { toCitizenView } = complaintService;
-const { notifyComplaint } = require("../socket/notify");
+const { notifyComplaint, notifySupport } = require("../socket/notify");
 const { EVENTS } = require("../socket/events");
 
 const notify = (req, event, complaint) =>
@@ -30,7 +30,7 @@ exports.createComplaint = async (req, res) => {
   });
 
   notify(req, EVENTS.COMPLAINT_CREATED, complaint);
-  res.status(201).json(complaint);
+  res.status(201).json(toCitizenView(complaint));
 };
 
 // my complaints (capped so the response can never grow without limit)
@@ -62,7 +62,28 @@ exports.updateStatus = async (req, res) => {
 };
 
 exports.getNearby = async (req, res) => {
-  res.json(await complaintService.findNearby(req.validatedQuery));
+  res.json(await complaintService.findNearby(req.validatedQuery, req.user._id));
+};
+
+exports.supportComplaint = async (req, res) => {
+  const result = await complaintService.addSupport({ id: req.params.id, userId: req.user._id });
+  if (result.changed) notifySupport(req.app.get("io"), result.complaint);
+  res.json({ supportCount: result.supportCount, supportedByMe: result.supportedByMe });
+};
+
+exports.unsupportComplaint = async (req, res) => {
+  const result = await complaintService.removeSupport({ id: req.params.id, userId: req.user._id });
+  if (result.changed) {
+    const complaint = await Complaint.findById(req.params.id)
+    .select("_id title user supportCount")
+    .lean();
+
+    if (complaint) {
+      notifySupport(req.app.get("io"), complaint);
+    }
+
+}
+  res.json({ supportCount: result.supportCount, supportedByMe: result.supportedByMe });
 };
 
 exports.getStats = async (req, res) => {

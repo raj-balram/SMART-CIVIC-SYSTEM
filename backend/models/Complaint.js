@@ -33,6 +33,13 @@ const complaintSchema = new mongoose.Schema(
     status: { type: String, enum: STATUSES, default: "Pending" },
     statusHistory: { type: [historySchema], default: [] },
     resolvedAt: { type: Date, default: null },
+        // "me too" support: who supports it (never sent to clients) and how many
+    supporters: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+      default: [],
+      select: false,
+    },
+    supportCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true }
 );
@@ -47,5 +54,6 @@ complaintSchema.index(
   { title: "text", description: "text" },
   { weights: { title: 5, description: 1 }, name: "complaint_text" } // title matches count more
 );
+complaintSchema.index({ supportCount: -1, createdAt: -1, _id: -1 }); // "most supported" sort
 
 module.exports = mongoose.model("Complaint", complaintSchema);
