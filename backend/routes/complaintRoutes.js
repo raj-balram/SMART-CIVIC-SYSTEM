@@ -9,6 +9,7 @@ const {
   updateStatusSchema,
   nearbyQuerySchema,
   adminListQuerySchema,
+  mapQuerySchema,
 } = require("../validators/schemas");
 const {
   createComplaint,
@@ -20,6 +21,7 @@ const {
   supportComplaint,
   unsupportComplaint,
   getStats,
+  getMap, getAnalytics
 } = require("../controllers/complaintController");
 
 const router = express.Router();
@@ -39,6 +41,8 @@ router.get("/nearby", validateQuery(nearbyQuerySchema), getNearby);
 router.get("/list", requireRole("admin"), validateQuery(adminListQuerySchema), listComplaints);
 router.get("/all", requireRole("admin"), getAllComplaintAdmin);
 router.get("/stats", requireRole("admin"), getStats);
+router.get("/map", requireRole("admin"), validateQuery(mapQuerySchema), getMap);
+router.get("/analytics", requireRole("admin"), getAnalytics);
 router.post("/:id/support", supportLimiter, validateObjectId("id"), supportComplaint);
 router.delete("/:id/support", supportLimiter, validateObjectId("id"), unsupportComplaint);
 router.put("/:id/status", requireRole("admin"), validateObjectId("id"), validateBody(updateStatusSchema), updateStatus);

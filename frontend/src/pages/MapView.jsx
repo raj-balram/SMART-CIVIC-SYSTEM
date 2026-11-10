@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
+import { useSearchParams } from "react-router-dom";
 import API from "../utils/api";
 import { useAuth } from "../context/AuthContext";
 import L from "leaflet";
@@ -19,34 +20,77 @@ const STATUS_CONFIG = {
   Resolved:      { pill: "bg-green-50 text-green-700 border border-green-200", dot: "bg-green-500" },
 };
 
+/* A complaint has { location: {lat, lng} }, a cluster has { lat, lng, count } */
+const pointOf = (p) =>
+  p.location ? [Number(p.location.lat), Number(p.location.lng)] : [Number(p.lat), Number(p.lng)];
+const hasCoords = (p) => pointOf(p).every(Number.isFinite); // 0 is a valid coordinate
+
 /* ── Heatmap layer ──────────────────────────────────────────── */
-const HeatmapLayer = ({ complaints }) => {
+const HeatmapLayer = ({ points }) => {
   const map = useMap();
   useEffect(() => {
-    if (!complaints.length) return;
-    const data = complaints
-      .filter((c) => c.location?.lat && c.location?.lng)
-      .map((c) => [Number(c.location.lat), Number(c.location.lng), 0.5]);
-    if (!data.length) return;
-    const layer = L.heatLayer(data, { radius: 25 }).addTo(map);
+    if (!points.length) return;
+    const layer = L.heatLayer(points, { radius: 25, max: 1 }).addTo(map);
     return () => map.removeLayer(layer);
-  }, [complaints, map]);
+  }, [points, map]);
   return null;
 };
 
-/* ── Auto fit bounds ────────────────────────────────────────── */
-const FitBounds = ({ complaints }) => {
+/* ── Fit the map to the data, once ──────────────────────────── */
+const FitOnce = ({ items, doneRef }) => {
   const map = useMap();
   useEffect(() => {
-    const bounds = complaints
-      .filter((c) => c.location?.lat && c.location?.lng)
-      .map((c) => [Number(c.location.lat), Number(c.location.lng)]);
-    if (bounds.length > 0) map.fitBounds(bounds, { padding: [50, 50] });
-  }, [complaints, map]);
+    if (doneRef.current || items.length === 0) return;
+    doneRef.current = true;
+    map.fitBounds(items.map(pointOf), { padding: [50, 50], maxZoom: 16 });
+  }, [items, map, doneRef]);
   return null;
 };
 
-/* ── Status badge (for Leaflet popup — plain HTML) ─────────── */
+/* ── Tell the page which area is on screen (admin map) ──────── */
+const ViewportReporter = ({ onChange }) => {
+  const map = useMap();
+  const report = useCallback(() => {
+    const b = map.getBounds();
+    onChange({
+      west: Math.max(-180, b.getWest()),
+      south: Math.max(-90, b.getSouth()),
+      east: Math.min(180, b.getEast()),
+      north: Math.min(90, b.getNorth()),
+      zoom: Math.max(1, Math.round(map.getZoom())),
+    });
+  }, [map, onChange]);
+  useMapEvents({ moveend: report });
+  useEffect(() => { report(); }, [report]);
+  return null;
+};
+
+/* ── A cluster of complaints: a numbered circle, red if any are overdue ── */
+const clusterIcon = (c) => {
+  const count = Number(c.count);
+  const size = Math.min(54, 26 + Math.sqrt(count) * 4);
+  const bg = c.overdue > 0 ? "#dc2626" : "#1e3a5f";
+  return L.divIcon({
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${bg};color:#fff;display:flex;align-items:center;justify-content:center;font:600 12px 'DM Sans',sans-serif;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.35)">${count}</div>`,
+    className: "",
+    iconSize: [size, size],
+  });
+};
+
+const ClusterMarker = ({ cluster }) => {
+  const map = useMap();
+  const position = pointOf(cluster);
+  return (
+    <Marker
+      position={position}
+      icon={clusterIcon(cluster)}
+      title={`${cluster.count} complaints (${cluster.overdue} overdue)`}
+      eventHandlers={{ click: () => map.flyTo(position, Math.min(map.getZoom() + 2, 18)) }}
+    />
+  );
+};
+
+/* ── Status badge (for Leaflet popup) ───────────────────────── */
 const StatusBadge = ({ status }) => {
   const c = STATUS_CONFIG[status] ?? { pill: "bg-gray-100 text-gray-600", dot: "bg-gray-400" };
   return (
@@ -57,59 +101,173 @@ const StatusBadge = ({ status }) => {
   );
 };
 
+/* ── Popup for one complaint ────────────────────────────────── */
+const ComplaintPopup = ({ c }) => (
+  <div style={{ fontFamily: "'DM Sans', sans-serif", padding: "4px 2px" }}>
+    <p style={{ fontWeight: 600, fontSize: "13px", color: "#0f1923", marginBottom: 4 }}>{c.title}</p>
+    <p style={{ fontSize: "12px", color: "#6b7a90", marginBottom: 8, lineHeight: 1.5 }}>{c.description}</p>
+
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+      <span style={{ fontSize: "11px", fontWeight: 500, background: "#f5f6f8", color: "#3d4a5c", padding: "1px 7px", borderRadius: 4 }}>
+        {c.category}
+      </span>
+      <StatusBadge status={c.status} />
+    </div>
+
+    {c.user?.name && <p style={{ fontSize: "11px", color: "#6b7a90" }}>By {c.user.name}</p>}
+
+    {c.dueAt && c.status !== "Resolved" && (
+      <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
+        🎯 Target: resolve by {new Date(c.dueAt).toLocaleDateString()}
+      </p>
+    )}
+    {c.supportCount > 0 && (
+      <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
+        👥 {c.supportCount} {c.supportCount === 1 ? "person supports" : "people support"} this
+      </p>
+    )}
+
+    {Array.isArray(c.statusHistory) && c.statusHistory.length > 0 && (
+      <div style={{ marginTop: 8, borderTop: "1px solid #eef0f3", paddingTop: 6 }}>
+        {c.statusHistory.slice(-3).reverse().map((h, i) => (
+          <p key={i} style={{ fontSize: "11px", color: "#6b7a90", margin: "2px 0", lineHeight: 1.4 }}>
+            <strong>{h.status}</strong> · {new Date(h.at).toLocaleDateString()}
+            {h.note ? `: ${h.note}` : ""}
+          </p>
+        ))}
+      </div>
+    )}
+
+    {c.image && (
+      <img
+        src={c.image}
+        alt=""
+        style={{ width: "100%", height: 90, objectFit: "cover", borderRadius: 6, marginTop: 8, border: "1px solid #dde0e6" }}
+      />
+    )}
+  </div>
+);
+
 /* ── Map View ───────────────────────────────────────────────── */
 const MapView = () => {
   const { socket, user } = useAuth();
-  const [complaints, setComplaints]   = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [showHeat, setShowHeat]       = useState(true);
+  const isAdmin = user?.role === "admin";
+  const [searchParams] = useSearchParams();
+
+  // the dashboard can link to a spot: /map?lat=..&lng=..&zoom=..
+  const startView = useMemo(() => {
+    const lat = Number(searchParams.get("lat"));
+    const lng = Number(searchParams.get("lng"));
+    const zoom = Number(searchParams.get("zoom"));
+    if (searchParams.get("lat") === null || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { center: [lat, lng], zoom: Number.isFinite(zoom) ? Math.min(Math.max(zoom, 3), 18) : 15 };
+  }, [searchParams]);
+
+  const [mapData, setMapData] = useState({ mode: "points", total: 0, items: [] });
+  const [adminStats, setAdminStats] = useState(null);
+  const [view, setView] = useState(null); // the area currently on screen (admin)
+  const [loading, setLoading] = useState(true);
+  const [showHeat, setShowHeat] = useState(true);
   const [filterStatus, setFilterStatus] = useState("All");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const latest = useRef(0);
+  const fitted = useRef(Boolean(startView)); // a link to a spot skips the automatic fit
 
   const defaultCenter = [20.5937, 78.9629];
+  const handleViewport = useCallback((v) => setView(v), []);
 
-  /* Fetch */
+  /* Citizens: their own complaints, loaded once */
   useEffect(() => {
-    if (!user) return;
-    const fetch = async () => {
+    if (!user || isAdmin) return;
+    API.get("/complaints")
+      .then((res) => setMapData({ mode: "points", total: res.data.length, items: res.data }))
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [user, isAdmin]);
+
+  /* Admins: the totals, and then only what is on screen */
+  const fetchAdminStats = useCallback(
+    () => API.get("/complaints/stats").then((r) => setAdminStats(r.data)).catch(() => {}),
+    []
+  );
+  useEffect(() => { if (isAdmin) fetchAdminStats(); }, [isAdmin, fetchAdminStats]);
+
+  useEffect(() => {
+    if (!isAdmin || !view) return;
+    const id = ++latest.current; // lets us ignore a slow response that arrives after a newer one
+    const timer = setTimeout(async () => {
       try {
-        const url = user.role === "admin" ? "/complaints/all" : "/complaints";
-        const res = await API.get(url);
-        setComplaints(res.data);
+        const params = { ...view };
+        if (filterStatus !== "All") params.status = filterStatus;
+        if (overdueOnly) params.overdue = "true";
+        const res = await API.get("/complaints/map", { params });
+        if (id === latest.current) setMapData(res.data);
       } catch (err) {
         console.error(err);
       } finally {
-        setLoading(false);
+        if (id === latest.current) setLoading(false);
       }
-    };
-    fetch();
-  }, [user]);
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [isAdmin, view, filterStatus, overdueOnly, refreshTick]);
 
-    /* Real-time */
+  /* Real-time */
   useEffect(() => {
-    if (!socket) return;
-    const onCreated = (c) =>
-      setComplaints((p) => (p.some((x) => x._id === c._id) ? p : [c, ...p]));
-    const onUpdated = (c) =>
-      setComplaints((p) => p.map((x) => (x._id === c._id ? c : x)));
+    if (!socket || !user) return;
 
+    if (isAdmin) {
+      const refresh = () => {
+        setRefreshTick((n) => n + 1);
+        fetchAdminStats();
+      };
+      const events = ["complaint:created", "complaint:updated", "complaint:supported", "complaint:overdue"];
+      events.forEach((e) => socket.on(e, refresh));
+      return () => events.forEach((e) => socket.off(e, refresh));
+    }
+
+    const onCreated = (c) =>
+      setMapData((d) => (d.items.some((x) => x._id === c._id) ? d : { ...d, total: d.total + 1, items: [c, ...d.items] }));
+    const onUpdated = (c) =>
+      setMapData((d) => ({ ...d, items: d.items.map((x) => (x._id === c._id ? c : x)) }));
     socket.on("complaint:created", onCreated);
     socket.on("complaint:updated", onUpdated);
     return () => {
       socket.off("complaint:created", onCreated);
       socket.off("complaint:updated", onUpdated);
     };
-  }, [socket]);
+  }, [socket, user, isAdmin, fetchAdminStats]);
 
-  /* Filtered list */
-  const visible = filterStatus === "All"
-    ? complaints
-    : complaints.filter((c) => c.status === filterStatus);
+  /* What to draw */
+  const visible = useMemo(() => {
+    const list = mapData.items.filter(hasCoords);
+    if (isAdmin) return list; // the server already applied the filters
+    return filterStatus === "All" ? list : list.filter((c) => c.status === filterStatus);
+  }, [mapData.items, isAdmin, filterStatus]);
 
-  /* Stats */
-  const total      = complaints.length;
-  const pending    = complaints.filter((c) => c.status === "Pending").length;
-  const inProgress = complaints.filter((c) => c.status === "In Progress").length;
-  const resolved   = complaints.filter((c) => c.status === "Resolved").length;
+  const heatPoints = useMemo(
+    () => visible.map((p) => [...pointOf(p), mapData.mode === "clusters" ? Math.min(1, p.count / 25) : 0.5]),
+    [visible, mapData.mode]
+  );
+
+  const counts = isAdmin
+    ? {
+        total: adminStats?.total ?? 0,
+        pending: adminStats?.pending ?? 0,
+        inProgress: adminStats?.inProgress ?? 0,
+        resolved: adminStats?.resolved ?? 0,
+      }
+    : {
+        total: mapData.items.length,
+        pending: mapData.items.filter((c) => c.status === "Pending").length,
+        inProgress: mapData.items.filter((c) => c.status === "In Progress").length,
+        resolved: mapData.items.filter((c) => c.status === "Resolved").length,
+      };
+
+  const summary =
+    mapData.mode === "clusters"
+      ? `${mapData.total} complaints in view, grouped into ${visible.length} clusters. Zoom in to see each one.`
+      : `Showing ${visible.length} pin${visible.length !== 1 ? "s" : ""}${filterStatus !== "All" ? ` · ${filterStatus}` : ""}`;
 
   return (
     <div className="space-y-5">
@@ -119,13 +277,12 @@ const MapView = () => {
         <div>
           <h1 className="text-2xl font-semibold text-[var(--color-text-1)]">Complaint map</h1>
           <p className="text-sm text-[var(--color-text-3)] mt-1">
-            {user?.role === "admin" ? "All complaints across the city" : "Your submitted complaints"}
+            {isAdmin ? "All complaints across the city" : "Your submitted complaints"}
           </p>
         </div>
 
         {/* Controls */}
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Status filter */}
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
@@ -137,7 +294,13 @@ const MapView = () => {
             <option>Resolved</option>
           </select>
 
-          {/* Heatmap toggle */}
+          {isAdmin && (
+            <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-2)] cursor-pointer select-none">
+              <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
+              Overdue only
+            </label>
+          )}
+
           <button
             onClick={() => setShowHeat((v) => !v)}
             className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-all cursor-pointer
@@ -154,10 +317,10 @@ const MapView = () => {
       {/* ── Quick stats row ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total",       value: total,      color: "text-[var(--color-text-1)]" },
-          { label: "Pending",     value: pending,    color: "text-amber-600"             },
-          { label: "In Progress", value: inProgress, color: "text-blue-600"              },
-          { label: "Resolved",    value: resolved,   color: "text-green-600"             },
+          { label: "Total",       value: counts.total,      color: "text-[var(--color-text-1)]" },
+          { label: "Pending",     value: counts.pending,    color: "text-amber-600"             },
+          { label: "In Progress", value: counts.inProgress, color: "text-blue-600"              },
+          { label: "Resolved",    value: counts.resolved,   color: "text-green-600"             },
         ].map(({ label, value, color }) => (
           <div
             key={label}
@@ -172,19 +335,9 @@ const MapView = () => {
       {/* ── Map card ── */}
       <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] overflow-hidden">
 
-        {/* Map header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--color-border)]">
-          <div className="flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="var(--color-text-3)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M10 2C6.13 2 3 5.13 3 9c0 5.25 7 11 7 11s7-5.75 7-11c0-3.87-3.13-7-7-7z"/>
-            </svg>
-            <span className="text-xs font-medium text-[var(--color-text-2)]">
-              Showing {visible.filter(c => c.location?.lat).length} pin{visible.filter(c => c.location?.lat).length !== 1 ? "s" : ""}
-              {filterStatus !== "All" && ` · ${filterStatus}`}
-            </span>
-          </div>
+          <span className="text-xs font-medium text-[var(--color-text-2)]">{summary}</span>
 
-          {/* Legend */}
           <div className="hidden sm:flex items-center gap-4">
             {[
               { label: "Pending",     dot: "bg-amber-400" },
@@ -199,21 +352,10 @@ const MapView = () => {
           </div>
         </div>
 
-        {/* Map container */}
-        {loading ? (
-          <div className="h-[60vh] flex items-center justify-center bg-[var(--color-surface-2)]">
-            <div className="flex items-center gap-2 text-sm text-[var(--color-text-3)]">
-              <svg className="w-4 h-4 animate-spin" viewBox="0 0 20 20" fill="none">
-                <circle cx="10" cy="10" r="8" stroke="#dde0e6" strokeWidth="2.5"/>
-                <path d="M10 2a8 8 0 0 1 8 8" stroke="var(--color-accent)" strokeWidth="2.5" strokeLinecap="round"/>
-              </svg>
-              Loading map…
-            </div>
-          </div>
-        ) : (
+        <div className="relative">
           <MapContainer
-            center={defaultCenter}
-            zoom={5}
+            center={startView?.center ?? defaultCenter}
+            zoom={startView?.zoom ?? 5}
             style={{ height: "60vh", width: "100%" }}
           >
             <TileLayer
@@ -221,96 +363,31 @@ const MapView = () => {
               attribution="© OpenStreetMap contributors"
             />
 
-            {visible.length > 0 && <FitBounds complaints={visible} />}
-            {showHeat && <HeatmapLayer complaints={visible} />}
+            {isAdmin && <ViewportReporter onChange={handleViewport} />}
+            <FitOnce items={visible} doneRef={fitted} />
+            {showHeat && <HeatmapLayer points={heatPoints} />}
 
-            {visible.map((c) =>
-              c.location?.lat && c.location?.lng ? (
-                <Marker
-                  key={c._id}
-                  position={[Number(c.location.lat), Number(c.location.lng)]}
-                >
-                  <Popup maxWidth={240}>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", padding: "4px 2px" }}>
-                      <p style={{ fontWeight: 600, fontSize: "13px", color: "#0f1923", marginBottom: 4 }}>
-                        {c.title}
-                      </p>
-                      <p style={{ fontSize: "12px", color: "#6b7a90", marginBottom: 8, lineHeight: 1.5 }}>
-                        {c.description}
-                      </p>
-
-                      {/* Category + status row */}
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-                        <span style={{
-                          fontSize: "11px", fontWeight: 500,
-                          background: "#f5f6f8", color: "#3d4a5c",
-                          padding: "1px 7px", borderRadius: 4
-                        }}>
-                          {c.category}
-                        </span>
-                        <StatusBadge status={c.status} />
-                      </div>
-
-                      {/* User (admin view) */}
-                      {c.user?.name && (
-                        <p style={{ fontSize: "11px", color: "#6b7a90" }}>
-                          By {c.user.name}
-                        </p>
-                      )}
-
-                      {c.dueAt && c.status !== "Resolved" && (
-                        <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
-                          🎯 Target: resolve by {new Date(c.dueAt).toLocaleDateString()}
-                        </p>
-                      )}
-
-                      {c.supportCount > 0 && (
-                        <p style={{ fontSize: "11px", color: "#6b7a90", margin: "6px 0 0" }}>
-                          👥 {c.supportCount} {c.supportCount === 1 ? "person supports" : "people support"} this
-                        </p>
-                      )}
-
-
-                      
-                      {/* Progress timeline */}
-                      {Array.isArray(c.statusHistory) && c.statusHistory.length > 0 && (
-                        <div style={{ marginTop: 8, borderTop: "1px solid #eef0f3", paddingTop: 6 }}>
-                          {c.statusHistory.slice(-3).reverse().map((h, i) => (
-                            <p key={i} style={{ fontSize: "11px", color: "#6b7a90", margin: "2px 0", lineHeight: 1.4 }}>
-                              <strong>{h.status}</strong> · {new Date(h.at).toLocaleDateString()}
-                              {h.note ? `: ${h.note}` : ""}
-                            </p>
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Image */}
-                      {c.image && (
-                        <img
-                          src={c.image}
-                          alt=""
-                          style={{
-                            width: "100%", height: 90,
-                            objectFit: "cover", borderRadius: 6,
-                            marginTop: 8, border: "1px solid #dde0e6"
-                          }}
-                        />
-                      )}
-                    </div>
-                  </Popup>
-                </Marker>
-              ) : null
-            )}
+            {mapData.mode === "clusters"
+              ? visible.map((c, i) => <ClusterMarker key={`${c.lat},${c.lng},${i}`} cluster={c} />)
+              : visible.map((c) => (
+                  <Marker key={c._id} position={pointOf(c)}>
+                    <Popup maxWidth={240}>
+                      <ComplaintPopup c={c} />
+                    </Popup>
+                  </Marker>
+                ))}
           </MapContainer>
-        )}
 
-        {/* Empty state overlay */}
-        {!loading && visible.filter(c => c.location?.lat).length === 0 && (
+          {loading && (
+            <div className="absolute inset-0 z-[1000] flex items-center justify-center bg-white/70 text-sm text-[var(--color-text-3)]">
+              Loading map…
+            </div>
+          )}
+        </div>
+
+        {!loading && visible.length === 0 && (
           <div className="px-5 py-4 border-t border-[var(--color-border)] flex items-center gap-2 text-sm text-[var(--color-text-3)]">
-            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <circle cx="10" cy="10" r="8.5"/><path d="M10 6v5M10 14h.01"/>
-            </svg>
-            No complaints to display
+            No complaints to display here
             {filterStatus !== "All" && (
               <button
                 onClick={() => setFilterStatus("All")}

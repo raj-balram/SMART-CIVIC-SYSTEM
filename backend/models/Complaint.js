@@ -58,6 +58,7 @@ complaintSchema.index(
 );
 complaintSchema.index({ supportCount: -1, createdAt: -1, _id: -1 }); // "most supported" sort
 complaintSchema.index({ status: 1, dueAt: 1 }); // overdue queries and the SLA job
+complaintSchema.index({ "location.lat": 1, "location.lng": 1 }); // map viewport (bounding box) queries
 
 
 module.exports = mongoose.model("Complaint", complaintSchema);

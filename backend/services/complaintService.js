@@ -14,6 +14,17 @@ const SORT_ORDERS = {
   support: { supportCount: -1, createdAt: -1, _id: -1 },
 };
 
+const POINT_LIMIT = 300; // up to this many complaints in view are returned individually
+const CLUSTER_LIMIT = 500;
+const HOTSPOT_CELL = 0.005; // degrees, about 550 m
+
+const isOpen = { $ne: ["$status", "Resolved"] };
+// A missing dueAt must never count as overdue: inside an aggregation expression,
+// a missing value compares as older than any date.
+const isOverdue = (now) => ({
+  $and: [isOpen, { $eq: [{ $type: "$dueAt" }, "date"] }, { $lt: ["$dueAt", now] }],
+});
+
 async function create({ user, title, description, category, image, lat, lng }) {
   return Complaint.create({
     user,
@@ -215,6 +226,135 @@ async function getStats() {
   };
 }
 
+// The admin map: only what is in view. Few complaints become pins, many become grid clusters.
+async function mapComplaints({ west, south, east, north, zoom, status, category, overdue }) {
+  const now = new Date();
+  const filter = {
+    "location.lat": { $gte: south, $lte: north },
+    "location.lng": { $gte: west, $lte: east },
+  };
+  if (status) filter.status = status;
+  if (category) filter.category = category;
+  if (overdue) {
+    filter.dueAt = { $lt: now };
+    filter.status = status ? (OPEN_STATUSES.includes(status) ? status : { $in: [] }) : { $in: OPEN_STATUSES };
+  }
+
+  const total = await Complaint.countDocuments(filter);
+
+  if (total <= POINT_LIMIT) {
+    const items = await Complaint.find(filter)
+      .select("title description category status location createdAt dueAt supportCount image user")
+      .populate("user", "name email")
+      .sort({ createdAt: -1 })
+      .lean();
+    return { mode: "points", total, items };
+  }
+
+  const cell = 80 / 2 ** zoom; // degrees: roughly a 60-pixel square at this zoom level
+  const items = await Complaint.aggregate([
+    { $match: filter },
+    {
+      $group: {
+        _id: {
+          x: { $floor: { $divide: ["$location.lng", cell] } },
+          y: { $floor: { $divide: ["$location.lat", cell] } },
+        },
+        count: { $sum: 1 },
+        lat: { $avg: "$location.lat" },
+        lng: { $avg: "$location.lng" },
+        open: { $sum: { $cond: [isOpen, 1, 0] } },
+        overdue: { $sum: { $cond: [isOverdue(now), 1, 0] } },
+      },
+    },
+    { $sort: { count: -1 } },
+    { $limit: CLUSTER_LIMIT },
+    { $project: { _id: 0, lat: 1, lng: 1, count: 1, open: 1, overdue: 1 } },
+  ]);
+  return { mode: "clusters", total, items };
+}
+
+// Performance by category and the busiest areas.
+async function getAnalytics() {
+  const now = new Date();
+  const resolvedWithTimes = { $and: [{ $eq: ["$status", "Resolved"] }, { $eq: [{ $type: "$resolvedAt" }, "date"] }] };
+
+  const [categoryRows, hotspotRows] = await Promise.all([
+    Complaint.aggregate([
+      {
+        $group: {
+          _id: "$category",
+          total: { $sum: 1 },
+          open: { $sum: { $cond: [isOpen, 1, 0] } },
+          resolved: { $sum: { $cond: [{ $eq: ["$status", "Resolved"] }, 1, 0] } },
+          overdue: { $sum: { $cond: [isOverdue(now), 1, 0] } },
+          resolvedOnTime: {
+            $sum: {
+              $cond: [
+                { $and: [resolvedWithTimes, { $eq: [{ $type: "$dueAt" }, "date"] }, { $lte: ["$resolvedAt", "$dueAt"] }] },
+                1,
+                0,
+              ],
+            },
+          },
+          avgMs: { $avg: { $cond: [resolvedWithTimes, { $subtract: ["$resolvedAt", "$createdAt"] }, null] } },
+        },
+      },
+      { $sort: { total: -1 } },
+    ]),
+    // open complaints per grid cell: first per cell and category, then per cell
+    Complaint.aggregate([
+      { $match: { status: { $in: OPEN_STATUSES } } },
+      {
+        $group: {
+          _id: {
+            x: { $floor: { $divide: ["$location.lng", HOTSPOT_CELL] } },
+            y: { $floor: { $divide: ["$location.lat", HOTSPOT_CELL] } },
+            category: "$category",
+          },
+          count: { $sum: 1 },
+          latSum: { $sum: "$location.lat" },
+          lngSum: { $sum: "$location.lng" },
+        },
+      },
+      {
+        $group: {
+          _id: { x: "$_id.x", y: "$_id.y" },
+          total: { $sum: "$count" },
+          latSum: { $sum: "$latSum" },
+          lngSum: { $sum: "$lngSum" },
+          categories: { $push: { category: "$_id.category", count: "$count" } },
+        },
+      },
+      { $sort: { total: -1 } },
+      { $limit: 5 },
+    ]),
+  ]);
+
+  const categories = categoryRows.map((r) => ({
+    category: r._id,
+    total: r.total,
+    open: r.open,
+    resolved: r.resolved,
+    overdue: r.overdue,
+    avgResolutionHours: r.avgMs == null ? null : Math.round((r.avgMs / 3_600_000) * 10) / 10,
+    slaCompliancePct: r.resolved ? Math.round((r.resolvedOnTime / r.resolved) * 100) : null,
+  }));
+
+  const hotspots = hotspotRows.map((h) => {
+    const top = [...h.categories].sort((a, b) => b.count - a.count)[0];
+    return {
+      lat: Math.round((h.latSum / h.total) * 1e5) / 1e5,
+      lng: Math.round((h.lngSum / h.total) * 1e5) / 1e5,
+      openCount: h.total,
+      topCategory: top.category,
+      topCategoryCount: top.count,
+    };
+  });
+
+  return { categories, hotspots };
+}
+
 // What a citizen may see: no admin identities, and never the list of supporters.
 function toCitizenView(complaint) {
   const obj = typeof complaint.toObject === "function" ? complaint.toObject() : { ...complaint };
@@ -234,4 +374,6 @@ module.exports = {
   listForAdmin,
   getStats,
   toCitizenView,
+  mapComplaints,
+  getAnalytics,
 };

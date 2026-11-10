@@ -99,6 +99,23 @@ const adminListQuerySchema = z.object({
   q: z.string().trim().min(2, "Search must be at least 2 characters").max(100, "Search must be 100 characters or fewer").optional(),
 });
 
+const flag = (message) =>
+  z.enum(["true", "false"], { message }).default("false").transform((v) => v === "true");
+
+const mapQuerySchema = z
+  .object({
+    west: coordinate("West", -180, 180),
+    south: coordinate("South", -90, 90),
+    east: coordinate("East", -180, 180),
+    north: coordinate("North", -90, 90),
+    zoom: intParam("Zoom", 1, 20, 12),
+    status: z.enum(STATUSES, { message: `Status must be one of: ${STATUSES.join(", ")}` }).optional(),
+    category: z.enum(CATEGORIES, { message: `Category must be one of: ${CATEGORIES.join(", ")}` }).optional(),
+    overdue: flag("overdue must be true or false"),
+  })
+  .refine((v) => v.west < v.east, { message: "west must be less than east", path: ["east"] })
+  .refine((v) => v.south < v.north, { message: "south must be less than north", path: ["north"] });
+
 module.exports = {
   CATEGORIES,
   STATUSES,
@@ -109,4 +126,5 @@ module.exports = {
   updateStatusSchema,
   nearbyQuerySchema,
   adminListQuerySchema,
+  mapQuerySchema,
 };

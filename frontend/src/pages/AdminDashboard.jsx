@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../utils/api";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
+import { Link } from "react-router-dom";
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const formatDate = (iso) =>
@@ -107,6 +108,72 @@ const CategoryChart = ({ data, total }) => {
     </div>
   );
 };
+/* Performance by category + the busiest areas */
+const AnalyticsPanel = ({ analytics }) => {
+  const { categories = [], hotspots = [] } = analytics;
+  if (categories.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="lg:col-span-2 bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)] mb-3">Performance by category</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-[var(--color-text-3)]">
+                <th className="py-2 font-semibold">Category</th>
+                <th className="py-2 font-semibold">Open</th>
+                <th className="py-2 font-semibold">Overdue</th>
+                <th className="py-2 font-semibold">Avg. resolution</th>
+                <th className="py-2 font-semibold">Met target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((c) => (
+                <tr key={c.category} className="border-t border-[var(--color-border)]">
+                  <td className="py-2 font-medium text-[var(--color-text-1)]">{c.category}</td>
+                  <td className="py-2 font-mono">{c.open}</td>
+                  <td className={`py-2 font-mono ${c.overdue > 0 ? "text-red-600 font-semibold" : ""}`}>{c.overdue}</td>
+                  <td className="py-2 font-mono">{c.avgResolutionHours == null ? "–" : formatHours(c.avgResolutionHours)}</td>
+                  <td className="py-2 font-mono">{c.slaCompliancePct == null ? "–" : `${c.slaCompliancePct}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)]">Busiest areas</h3>
+        <p className="text-[11px] text-[var(--color-text-3)] mb-3">Open complaints per area of about 550 m</p>
+        {hotspots.length === 0 ? (
+          <p className="text-xs text-[var(--color-text-3)]">No open complaints.</p>
+        ) : (
+          <ol className="space-y-3">
+            {hotspots.map((h) => (
+              <li key={`${h.lat},${h.lng}`} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-text-1)]">
+                    {h.openCount} open · mostly {h.topCategory}
+                  </p>
+                  <p className="text-[11px] font-mono text-[var(--color-text-3)]">
+                    {h.lat.toFixed(4)}, {h.lng.toFixed(4)}
+                  </p>
+                </div>
+                <Link
+                  to={`/map?lat=${h.lat}&lng=${h.lng}&zoom=16`}
+                  className="text-xs text-[var(--color-accent)] hover:underline shrink-0"
+                >
+                  View on map
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+};
 
 /* 30-day trend: reported vs resolved per day */
 const TrendChart = ({ trend = [] }) => {
@@ -193,6 +260,7 @@ const AdminDashboard = () => {
   const [filterCat, setFilterCat] = useState("All");
   const [sortBy, setSortBy] = useState("newest");
   const [overdueOnly, setOverdueOnly] = useState(false);
+  const [analytics, setAnalytics] = useState({ categories: [], hotspots: [] });
 
   // wait until the admin stops typing before asking the server
   useEffect(() => {
@@ -248,6 +316,15 @@ const AdminDashboard = () => {
     }
   }, []);
 
+    const fetchAnalytics = useCallback(async () => {
+    try {
+      setAnalytics((await API.get("/complaints/analytics")).data);
+    } catch {
+      /* the panel simply stays empty */
+    }
+  }, []);
+  useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
+
   useEffect(() => { fetchList(); }, [fetchList]);
   useEffect(() => { fetchStats(); }, [fetchStats]);
 
@@ -258,8 +335,9 @@ const AdminDashboard = () => {
     refreshTimer.current = setTimeout(() => {
       fetchList();
       fetchStats();
+      fetchAnalytics();
     }, 400);
-  }, [fetchList, fetchStats]);
+  }, [fetchList, fetchStats, fetchAnalytics]);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
     useEffect(() => {
@@ -299,6 +377,7 @@ const AdminDashboard = () => {
     }
     fetchList();
     fetchStats();
+    fetchAnalytics();
   };
 
   const filtered = complaints; // the server already filtered, sorted and paged it
@@ -422,6 +501,7 @@ const AdminDashboard = () => {
       </div>
 
       <TrendChart trend={stats.trend} />
+      <AnalyticsPanel analytics={analytics} />
 
       {/* ── Complaints table ── */}
       <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)]">

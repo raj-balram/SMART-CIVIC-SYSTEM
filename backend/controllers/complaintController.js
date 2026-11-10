@@ -89,3 +89,11 @@ exports.unsupportComplaint = async (req, res) => {
 exports.getStats = async (req, res) => {
   res.json(await complaintService.getStats());
 };
+
+exports.getMap = async (req, res) => {
+  res.json(await complaintService.mapComplaints(req.validatedQuery));
+};
+
+exports.getAnalytics = async (req, res) => {
+  res.json(await complaintService.getAnalytics());
+};
