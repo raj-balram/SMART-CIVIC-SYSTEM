@@ -4,7 +4,7 @@
 
 Citizens report civic problems (potholes, garbage, water, power) on a map. Admins triage, resolve and track them against service deadlines, with live updates.
 
-**Live demo:** <your Vercel URL> · **API health:** <your Render URL>/health  
+**Live demo:** https://smart-civic-system.vercel.app/map · **API health:** https://smart-civic-system-backend.onrender.com/health  
 *Hosted on free tiers, so the first request after a quiet period can be slow.*
 
 
@@ -80,6 +80,8 @@ flowchart LR
 Socket events: `complaint:created`, `complaint:updated`, `complaint:supported` (to admins and the owner) and `complaint:overdue` (to admins).
 
 ## Run it locally
+
+“Photo uploads need Cloudinary credentials in backend/.env. Without them everything else works and photo attachments are refused with a clear message.”
 
 ```bash
 docker compose up -d            # MongoDB on port 27019

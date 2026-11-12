@@ -5,6 +5,7 @@ const complaintService = require("../services/complaintService");
 const { toCitizenView } = complaintService;
 const { notifyComplaint, notifySupport } = require("../socket/notify");
 const { EVENTS } = require("../socket/events");
+const env = require("../config/env");
 
 const notify = (req, event, complaint) =>
   notifyComplaint(req.app.get("io"), event, complaint._id, complaint.user).catch((err) =>
@@ -13,9 +14,12 @@ const notify = (req, event, complaint) =>
 
 exports.createComplaint = async (req, res) => {
   const { title, description, category, lat, lng } = req.body;
-
+    
   let image = "";
   if (req.file) {
+    if (!env.CLOUDINARY_ENABLED) {
+      throw new AppError(503, "Photo uploads are not configured on this server");
+    }
     try {
       image = (await streamUpload(req.file.buffer)).secure_url;
     } catch (err) {
