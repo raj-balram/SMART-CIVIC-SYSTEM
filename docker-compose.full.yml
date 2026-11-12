@@ -1,0 +1,34 @@
+name: civic-full
+
+services:
+  mongo:
+    image: mongo:7
+    volumes:
+      - civic-full-data:/data/db
+
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      NODE_ENV: production
+      PORT: "5000"
+      MONGO_URI: mongodb://mongo:27017/civic
+      FRONTEND_URL: http://localhost:8080
+      TRUST_PROXY: "0" # no proxy in front of it here
+    ports:
+      - "5000:5000"
+    depends_on:
+      - mongo
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_BACKEND_URL: http://localhost:5000
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  civic-full-data:

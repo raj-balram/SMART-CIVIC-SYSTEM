@@ -2,3 +2,6 @@
   .env
   dist/
   .DS_Store
+
+  *.gz
+civic-prod-backup*

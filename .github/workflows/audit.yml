@@ -1,0 +1,22 @@
+name: Dependency audit
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # every Monday, 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-22.04
+    strategy:
+      matrix:
+        dir: [backend, frontend]
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm audit --omit=dev --audit-level=high

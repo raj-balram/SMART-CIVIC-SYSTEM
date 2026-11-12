@@ -2,13 +2,18 @@ const http = require("http");
 const mongoose = require("mongoose");
 const { io: connectClient } = require("socket.io-client");
 const { MongoMemoryServer } = require("mongodb-memory-server");
+const os = require("os");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let counter = 0;
 
 async function startTestServer() {
   const mongod = await MongoMemoryServer.create();
-  await mongoose.connect(mongod.getUri("civic_test"));
+  await mongoose.connect(mongod.getUri("civic_test"), {
+    runtimeAdapters: {
+      os,
+    },
+  });
 
   const app = require("../app");
   const { initSocket } = require("../socket");

@@ -39,10 +39,6 @@ exports.getComplaints = async (req, res) => {
   res.json(complaints.map(toCitizenView));
 };
 
-// used by the admin map; capped, and replaced by a light, clustered endpoint in a later phase
-exports.getAllComplaintAdmin = async (req, res) => {
-  res.json(await Complaint.find().populate("user", "name email").sort({ createdAt: -1 }).limit(1000));
-};
 
 // the dashboard table: paginated, filtered, searched and sorted by the database
 exports.listComplaints = async (req, res) => {

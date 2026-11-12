@@ -1,266 +1,117 @@
-# 🏙️ Smart Civic Management Portal
+# Smart Civic System
 
-A full-stack civic complaint management system built for citizens and administrators. Citizens can submit geo-tagged complaints with photos, track resolution status in real time, and view a live heatmap of issues across the city. Admins get a full dashboard with stats, filters, and instant status updates.
+[![CI](https://github.com/raj-balram/SMART-CIVIC-SYSTEM/actions/workflows/ci.yml/badge.svg)](https://github.com/raj-balram/SMART-CIVIC-SYSTEM/actions)
 
-**Live Demo:** [civic-frontend.vercel.app](https://smart-civic-system.vercel.app/)
+Citizens report civic problems (potholes, garbage, water, power) on a map. Admins triage, resolve and track them against service deadlines, with live updates.
 
----
+**Live demo:** <your Vercel URL> · **API health:** <your Render URL>/health  
+*Hosted on free tiers, so the first request after a quiet period can be slow.*
 
-## 📸 Screenshots
 
-> Add screenshots here after deployment — login page, map view, admin dashboard
+## Screenshots
 
----
+### Admin Map
+![Admin map with complaint clusters](docs/screenshots/admin-map.png)
 
-## ✨ Features
+### Dashboard Analytics
+![Dashboard analytics and busiest areas](docs/screenshots/dashboard-analytics1.png)
+![Dashboard analytics and busiest areas](docs/screenshots/dashboard-analytics2.png)
 
-### Citizens
-- 📝 Submit complaints with title, description, category and photo
-- 📍 Auto-detected GPS location pinned on map
-- 🗺️ View all your complaints on an interactive map
-- 🔔 Real-time status updates via Socket.IO
-- 👤 Profile page with complaint history and stats
-- ✏️ Edit your display name
+### Nearby Complaint Detection
+![Already reported nearby panel](docs/screenshots/nearby-complaints1.png)
+![Already reported nearby panel](docs/screenshots/nearby-complaints2.png)
 
-### Admins
-- 📊 Dashboard with live stats — total, pending, in progress, resolved
-- 📈 Category breakdown bar chart + resolution rate
-- 🔍 Search, filter by status/category, sort complaints
-- ⚡ Real-time new complaint notifications
-- 🔄 One-click status updates (Pending → In Progress → Resolved)
-- 🗺️ Full city-wide complaint heatmap
+### Real-time Status Notification
+![Complaint status notification toast](docs/screenshots/status-toast.png)
 
-### General
-- 🔐 JWT authentication with role-based access (user / admin)
-- 📱 Fully responsive — works on mobile, tablet and desktop
-- ☁️ Image uploads via Cloudinary
-- 🔴 Live updates via Socket.IO (no page refresh needed)
 
----
+## What it does
 
-## 🛠️ Tech Stack
+**For citizens:** report a problem with a photo and GPS location. If similar open complaints exist within 150 m, the form offers **"Me too"** instead of a duplicate. They get live toasts with the admin's notes as the status changes.
 
-### Frontend
-| Technology | Purpose |
-|---|---|
-| React 18 | UI framework |
-| Vite | Build tool |
-| Tailwind CSS v4 | Styling |
-| React Router v6 | Client-side routing |
-| Axios | API requests |
-| Socket.IO Client | Real-time updates |
-| React Leaflet | Interactive maps |
-| Leaflet.heat | Heatmap layer |
-| React Hot Toast | Notifications |
+**For admins:** a paginated, searchable dashboard; a status workflow with history; service-level deadlines with automatic **overdue** flagging and alerts; analytics per category; "busiest areas"; and a map that stays fast with thousands of complaints (pins when zoomed in, clusters when zoomed out, plus a heatmap).
 
-### Backend
-| Technology | Purpose |
-|---|---|
-| Node.js + Express | Server framework |
-| MongoDB + Mongoose | Database |
-| JWT | Authentication |
-| bcryptjs | Password hashing |
-| Socket.IO | Real-time events |
-| Multer | File upload handling |
-| Cloudinary | Image storage |
+## Architecture
 
-### Deployment
-| Service | Purpose |
-|---|---|
-| Vercel | Frontend hosting |
-| Render | Backend hosting |
-| MongoDB Atlas | Cloud database |
-| Cloudinary | Image CDN |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js v18+
-- MongoDB (local or Atlas)
-- Cloudinary account (free tier)
-
-### 1. Clone the repository
-```bash
-git clone https://github.com/raj-balram/SMART-CIVIC-SYSTEM.git
-cd SMART-CIVIC-SYSTEM
+```mermaid
+flowchart LR
+  UI[React + Vite] -- REST + JWT --> API[Express API]
+  UI -- Socket.IO + JWT --> API
+  API --> DB[(MongoDB)]
+  API --> CL[Cloudinary: images]
+  JOB[SLA job] --> DB
+  API --- JOB
 ```
 
-### 2. Backend setup
-```bash
-cd civic-backend
-npm install
-```
+## Engineering decisions
 
-Create a `.env` file in the backend root:
-```env
-MONGO_URI=mongodb+srv://<user>:<password>@cluster.mongodb.net/civic?retryWrites=true&w=majority
-JWT_SECRET=your_long_random_jwt_secret
-ADMIN_SECRET=your_chosen_admin_key
-CLOUDINARY_CLOUD_NAME=your_cloudinary_cloud_name
-CLOUDINARY_API_KEY=your_cloudinary_api_key
-CLOUDINARY_API_SECRET=your_cloudinary_api_secret
-PORT=5000
-```
+- **Live updates are scoped by rooms.** Sockets are authenticated at connection time and joined to `admin` and `user:<id>` rooms, with the role read from the database. A test suite proves a citizen never receives another user's complaint, including with forged or deleted-user tokens.
+- **Status changes are atomic.** One conditional update means two admins can't both win, and every change is recorded in a history (who, when, note). Citizens see notes but never which admin acted.
+- **"Me too" is idempotent.** A single conditional write adds one supporter per person; 20 simultaneous requests from one user count once. The list of supporters is never sent to clients.
+- **Service levels.** Each category has a target time. A background job flags overdue complaints exactly once, even with several server instances, and alerts admins.
+- **Scale lives in the database.** Pagination, filters, text search, statistics and map clustering are indexed MongoDB queries. Sorts end with `_id` so paging is stable without an in-memory sort.
+- **Hardening.** Zod validation on every input, one central error handler (no internal details leak), rate limits (per IP for login and registration, per user for creating complaints and supporting), helmet, upload checks (type allow-list plus file signature), and admins created by a script rather than a public endpoint.
+- **Safe data migrations.** Scripts are idempotent and dry-run by default, and are covered by tests.
 
-Start the server:
-```bash
-node server.js
-# Server running on port 5000 🚀
-```
+### Index evidence (`npm run explain`, 301 complaints)
 
-### 3. Frontend setup
-```bash
-cd civic-frontend
-npm install
-```
-
-Create a `.env` file in the frontend root:
-```env
-VITE_BACKEND_URL=http://localhost:5000
-```
-
-Start the dev server:
-```bash
-npm run dev
-# http://localhost:5173
-```
-
----
-
-## 📁 Project Structure
-```
-civic-backend/
-├── config/
-│   ├── db.js               # MongoDB connection
-│   └── cloudinary.js       # Cloudinary config
-├── controllers/
-│   ├── authController.js   # Register, login
-│   └── complaintController.js  # CRUD + stats
-├── middlewares/
-│   ├── authMiddleware.js   # JWT protect
-│   └── upload.js           # Multer config
-├── models/
-│   ├── User.js             # User schema
-│   └── Complaint.js        # Complaint schema
-├── routes/
-│   ├── authRoutes.js       # /api/auth/*
-│   └── complaintRoutes.js  # /api/complaints/*
-├── utils/
-│   ├── generateToken.js    # JWT generator
-│   └── cloudinaryUpload.js # Stream upload
-└── server.js               # Entry point
-
-civic-frontend/
-├── src/
-│   ├── components/
-│   │   ├── Layout.jsx      # Sidebar + topbar shell
-│   │   └── Map.jsx         # Location picker map
-│   ├── context/
-│   │   └── AuthContext.jsx # Auth + socket state
-│   ├── pages/
-│   │   ├── Login.jsx
-│   │   ├── Register.jsx
-│   │   ├── ComplaintForm.jsx
-│   │   ├── MapView.jsx
-│   │   ├── Profile.jsx
-│   │   └── AdminDashboard.jsx
-│   ├── utils/
-│   │   └── api.js          # Axios instance
-│   ├── App.jsx             # Routes
-│   └── index.css           # Tailwind v4 theme
-```
-
----
-
-## 🔑 API Reference
-
-### Auth
-| Method | Endpoint | Description | Auth |
-|---|---|---|---|
-| POST | `/api/auth/register` | Register new user | No |
-| POST | `/api/auth/login` | Login | No |
-| GET | `/api/auth/me` | Get current user | Yes |
-| PUT | `/api/auth/me` | Update display name | Yes |
-
-### Complaints
-| Method | Endpoint | Description | Auth |
-|---|---|---|---|
-| POST | `/api/complaints` | Submit complaint | User |
-| GET | `/api/complaints` | Get my complaints | User |
-| GET | `/api/complaints/all` | Get all complaints | Admin |
-| GET | `/api/complaints/stats` | Get dashboard stats | Admin |
-| PUT | `/api/complaints/:id/status` | Update status | Admin |
-
----
-
-## 🔴 Real-time Events (Socket.IO)
-
-| Event | Direction | Payload |
+| Query | Plan | Documents examined |
 |---|---|---|
-| `newComplaint` | Server → All clients | New complaint object |
-| `statusUpdate_<userId>` | Server → Specific user | Updated complaint object |
+| Admin list, Pending, newest first | `LIMIT -> FETCH -> IXSCAN` | 20 for 20 returned |
+| Text search | `LIMIT -> TEXT_MATCH -> FETCH -> IXSCAN` | 20 |
+| Search by title with no index (for contrast) | `COLLSCAN` | 301 |
 
----
+## API
 
-## 🌍 Deployment
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/auth/register`, `/api/auth/login` | JWT; the role is never taken from the request |
+| GET, PUT | `/api/auth/me` | profile |
+| POST | `/api/complaints` | multipart, with an optional image |
+| GET | `/api/complaints` | my complaints |
+| GET | `/api/complaints/nearby` | open complaints near a point (any user) |
+| POST, DELETE | `/api/complaints/:id/support` | "me too" and undo |
+| GET | `/api/complaints/list` | admin: paginated, filtered, searched, sorted |
+| GET | `/api/complaints/map` | admin: viewport pins or clusters |
+| GET | `/api/complaints/stats`, `/api/complaints/analytics` | admin |
+| PUT | `/api/complaints/:id/status` | admin: validated workflow transitions |
+| GET | `/health` | database status |
 
-### Frontend → Vercel
-1. Push `civic-frontend` to GitHub
-2. Import repo on [vercel.com](https://vercel.com)
-3. Add env variable: `VITE_BACKEND_URL=https://your-render-url.onrender.com`
-4. Deploy — auto-redeploys on every push
+Socket events: `complaint:created`, `complaint:updated`, `complaint:supported` (to admins and the owner) and `complaint:overdue` (to admins).
 
-### Backend → Render
-1. Push `civic-backend` to GitHub
-2. New Web Service on [render.com](https://render.com)
-3. Build command: `npm install` | Start command: `node server.js`
-4. Add all 6 environment variables
-5. Deploy
+## Run it locally
 
----
+```bash
+docker compose up -d            # MongoDB on port 27019
+cd backend
+cp .env.example .env            # Windows: copy .env.example .env, then fill it in
+npm install
+npm run seed                    # demo data (SEED_COUNT=1500 for a bigger map)
+npm run dev
+# second terminal
+cd frontend && cp .env.example .env && npm install && npm run dev
+```
 
-## 👤 Default Roles
+Demo logins after seeding: `admin@civic.test` / `Admin@12345` and `citizen1@civic.test` / `Citizen@12345`.
 
-| Role | Access |
-|---|---|
-| `user` | Submit complaints, view own complaints, profile |
-| `admin` | All user access + admin dashboard, status updates, all complaints |
+Everything in one command: `docker compose -f docker-compose.full.yml up --build`, then open http://localhost:8080.
 
-To register as admin — use the "Admin registration" option on the register page and enter the `ADMIN_SECRET` value from your env.
+## Tests
 
----
+```bash
+cd backend && npm test          # 102 tests, using an in-memory MongoDB
+```
+They cover auth, roles, validation, upload checks, rate limits, socket privacy, the status workflow (including concurrent requests), support, SLA escalation, pagination and search, the clustered map, analytics and the data migrations. CI runs them on every push.
 
-## 🐛 Known Limitations
+## Deployment
 
-- Render free tier sleeps after 15 min of inactivity — first request may take ~30 seconds
-- No email notifications yet (planned feature)
-- No pagination on admin table (planned for large datasets)
+Frontend on Vercel, API on Render, database on MongoDB Atlas. Required settings are listed in `backend/.env.example`.
 
----
+## Known limitations
 
-## 🗺️ Roadmap
-
-- [ ] Email notifications when complaint status changes
-- [ ] Edit / delete own complaints
-- [ ] Comments and admin replies per complaint
-- [ ] Export complaints as PDF / Excel
-- [ ] Complaint priority levels (Low / Medium / High)
-- [ ] Profile photo upload
-- [ ] Pagination on admin dashboard
-
----
-
-## 📄 License
-
-MIT License — free to use and modify.
-
----
-
-## 🙏 Acknowledgements
-
-- [OpenStreetMap](https://www.openstreetmap.org/) — map tiles
-- [Leaflet.js](https://leafletjs.com/) — map library
-- [Cloudinary](https://cloudinary.com/) — image hosting
-- [Socket.IO](https://socket.io/) — real-time engine
+- Search matches whole words, and reporters can't be searched by name.
+- The supporters list is stored on the complaint, which is fine into the thousands; beyond that it should move to its own collection.
+- Rate limits are in server memory, so with several instances they would move to Redis.
+- Analytics scan the collection, so beyond ~100k complaints they should be cached or pre-aggregated.
+- Service deadlines are constants in code; a real deployment would let each department configure them.
+- The JWT lives in localStorage; an httpOnly cookie would also need CSRF protection.

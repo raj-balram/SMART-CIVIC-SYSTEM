@@ -14,7 +14,6 @@ const {
 const {
   createComplaint,
   getComplaints,
-  getAllComplaintAdmin,
   listComplaints,
   updateStatus,
   getNearby,
@@ -39,7 +38,6 @@ router.post(
 router.get("/", getComplaints);
 router.get("/nearby", validateQuery(nearbyQuerySchema), getNearby);
 router.get("/list", requireRole("admin"), validateQuery(adminListQuerySchema), listComplaints);
-router.get("/all", requireRole("admin"), getAllComplaintAdmin);
 router.get("/stats", requireRole("admin"), getStats);
 router.get("/map", requireRole("admin"), validateQuery(mapQuerySchema), getMap);
 router.get("/analytics", requireRole("admin"), getAnalytics);

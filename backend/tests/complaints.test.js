@@ -101,20 +101,20 @@ describe("roles", () => {
 
   test("anonymous requests get 401", async () => {
     expect((await request(server.app).get("/api/complaints")).status).toBe(401);
-    expect((await request(server.app).get("/api/complaints/all")).status).toBe(401);
+    expect((await request(server.app).get("/api/complaints/list")).status).toBe(401);
   });
 
   test("a normal user gets 403 on every admin route", async () => {
-    expect((await authed(request(server.app).get("/api/complaints/all"), citizen.token)).status).toBe(403);
+    expect((await authed(request(server.app).get("/api/complaints/list"), citizen.token)).status).toBe(403);
     expect((await authed(request(server.app).get("/api/complaints/stats"), citizen.token)).status).toBe(403);
     const put = authed(request(server.app).put(`/api/complaints/${complaintId}/status`), citizen.token);
     expect((await put.send({ status: "Resolved" })).status).toBe(403);
   });
 
   test("an admin lists everything (with the reporter's name) and sees stats", async () => {
-    const all = await authed(request(server.app).get("/api/complaints/all"), admin.token);
+    const all = await authed(request(server.app).get("/api/complaints/list"), admin.token);
     expect(all.status).toBe(200);
-    expect(all.body[0].user).toEqual(expect.objectContaining({ name: expect.any(String) }));
+    expect(all.body.items[0].user).toEqual(expect.objectContaining({ name: expect.any(String) }));
 
     const stats = await authed(request(server.app).get("/api/complaints/stats"), admin.token);
     expect(stats.status).toBe(200);

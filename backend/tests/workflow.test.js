@@ -127,8 +127,8 @@ describe("privacy", () => {
     expect(own.statusHistory[1].note).toBe("On it");
     for (const entry of own.statusHistory) expect(entry).not.toHaveProperty("by");
 
-    const all = await authed(api().get("/api/complaints/all"), admin.token);
-    const adminView = all.body.find((c) => c._id === id);
+    const all = await authed(api().get("/api/complaints/list"), admin.token);
+    const adminView = all.body.items.find((c) => c._id === id);
     expect(adminView.statusHistory[1].by).toBe(admin.user._id.toString());
   });
 

@@ -1,12 +1,14 @@
 const mongoose = require("mongoose");
-require("../config/env");
 const connectDB = require("../config/db");
 const User = require("../models/User");
 
 async function main() {
   await connectDB();
+  // safe by default: nothing is written unless --apply is present (it is set in package.json)
+  const apply = process.argv.includes("--apply");
+
   const users = await User.find({}).select("email");
-  let fixed = 0;
+  let toFix = 0;
   let conflicts = 0;
 
   for (const u of users) {
@@ -15,16 +17,15 @@ async function main() {
 
     const clash = await User.exists({ email: normalized, _id: { $ne: u._id } });
     if (clash) {
-      console.log(`CONFLICT (not changed): "${u.email}" collides with an existing account`);
+      console.log(`CONFLICT ${u._id}: another account already uses the lowercase address (not changed)`);
       conflicts += 1;
       continue;
     }
-    await User.updateOne({ _id: u._id }, { $set: { email: normalized } });
-    console.log(`Fixed: "${u.email}" -> "${normalized}"`);
-    fixed += 1;
+    if (apply) await User.updateOne({ _id: u._id }, { $set: { email: normalized } });
+    toFix += 1;
   }
 
-  console.log(`Done. Fixed ${fixed}, conflicts ${conflicts}, total users ${users.length}`);
+  console.log(apply ? "APPLIED:" : "DRY RUN, nothing was written:", { total: users.length, toFix, conflicts });
   await mongoose.disconnect();
 }
 
