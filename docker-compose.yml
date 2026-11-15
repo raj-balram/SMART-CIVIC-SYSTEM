@@ -1,0 +1,10 @@
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27019:27017"
+    volumes:
+      - civic-mongo-data:/data/db
+
+volumes:
+  civic-mongo-data:

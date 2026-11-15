@@ -1,128 +1,99 @@
 const Complaint = require("../models/Complaint");
 const streamUpload = require("../utils/cloudinaryUpload");
+const AppError = require("../utils/AppError");
+const complaintService = require("../services/complaintService");
+const { toCitizenView } = complaintService;
+const { notifyComplaint, notifySupport } = require("../socket/notify");
+const { EVENTS } = require("../socket/events");
+const env = require("../config/env");
 
-const categories = ["Road", "Garbage", "Electricity", "Water", "Other"];
-const statuses = ["Pending", "In Progress", "Resolved"];
+const notify = (req, event, complaint) =>
+  notifyComplaint(req.app.get("io"), event, complaint._id, complaint.user).catch((err) =>
+    console.error("Socket notify failed:", err)
+  );
 
-// CREATE COMPLAINT
 exports.createComplaint = async (req, res) => {
-  try {
-    const { title, description, category, lat, lng } = req.body;
-
-    if (!title || !description || !category || !lat || !lng)
-      return res.status(400).json({ message: "All fields are required" });
-
-    if (!categories.includes(category))
-      return res.status(400).json({ message: "Invalid category" });
-
-    let imageUrl = "";
-    if (req.file) {
-      const result = await streamUpload(req.file.buffer);
-      imageUrl = result.secure_url;
+  const { title, description, category, lat, lng } = req.body;
+    
+  let image = "";
+  if (req.file) {
+    if (!env.CLOUDINARY_ENABLED) {
+      throw new AppError(503, "Photo uploads are not configured on this server");
     }
-
-    const complaint = await Complaint.create({
-      user: req.user._id,
-      title,
-      description,
-      category,
-      image: imageUrl,
-      location: { lat: Number(lat), lng: Number(lng) },
-      status: "Pending",
-    });
-
-    const io = req.app.get("io");
-    io.emit("newComplaint", complaint);
-
-    res.status(201).json(complaint);
-  } catch (err) {
-    console.error("Error creating complaint:", err);
-    res.status(500).json({ message: err.message });
+    try {
+      image = (await streamUpload(req.file.buffer)).secure_url;
+    } catch (err) {
+      console.error("Image upload failed:", err);
+      throw new AppError(502, "Image upload failed, please try again");
+    }
   }
+
+  const complaint = await complaintService.create({
+    user: req.user._id, // always the logged-in user, never a value from the request
+    title, description, category, image, lat, lng,
+  });
+
+  notify(req, EVENTS.COMPLAINT_CREATED, complaint);
+  res.status(201).json(toCitizenView(complaint));
 };
 
-// GET USER COMPLAINTS
+// my complaints (capped so the response can never grow without limit)
 exports.getComplaints = async (req, res) => {
-  try {
-    const complaints = await Complaint.find({ user: req.user._id }).sort({
-      createdAt: -1,
-    });
-    res.json(complaints);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  const complaints = await Complaint.find({ user: req.user._id }).sort({ createdAt: -1 }).limit(500).lean();
+  res.json(complaints.map(toCitizenView));
 };
 
-// GET ALL COMPLAINTS (ADMIN)
-exports.getAllComplaintAdmin = async (req, res) => {
-  try {
-    if (req.user.role !== "admin")
-      return res.status(403).json({ message: "Access denied" });
 
-    const complaints = await Complaint.find()
-      .populate("user", "name email")
-      .sort({ createdAt: -1 });
-
-    res.json(complaints);
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+// the dashboard table: paginated, filtered, searched and sorted by the database
+exports.listComplaints = async (req, res) => {
+  res.json(await complaintService.listForAdmin(req.validatedQuery));
 };
 
-// UPDATE COMPLAINT STATUS (ADMIN)
 exports.updateStatus = async (req, res) => {
-  try {
-    if (req.user.role !== "admin")
-      return res.status(403).json({ message: "Access denied" });
+  const complaint = await complaintService.changeStatus({
+    id: req.params.id,
+    to: req.body.status,
+    adminId: req.user._id,
+    note: req.body.note,
+  });
 
-    const { status } = req.body;
-    if (!statuses.includes(status))
-      return res.status(400).json({ message: "Invalid status" });
-
-    const complaint = await Complaint.findById(req.params.id);
-    if (!complaint)
-      return res.status(404).json({ message: "Complaint not found" });
-
-    complaint.status = status;
-    await complaint.save();
-
-    const io = req.app.get("io");
-    io.emit(`statusUpdate_${complaint.user}`, complaint);
-
-    res.json({ message: "Status updated", complaint });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+  notify(req, EVENTS.COMPLAINT_UPDATED, complaint);
+  res.json({ message: "Status updated", complaint });
 };
 
-// GET ADMIN STATS — fixed: enum values are Title Case in schema
-exports.getStats = async (req, res) => {
-  try {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ message: "Access denied" });
+exports.getNearby = async (req, res) => {
+  res.json(await complaintService.findNearby(req.validatedQuery, req.user._id));
+};
+
+exports.supportComplaint = async (req, res) => {
+  const result = await complaintService.addSupport({ id: req.params.id, userId: req.user._id });
+  if (result.changed) notifySupport(req.app.get("io"), result.complaint);
+  res.json({ supportCount: result.supportCount, supportedByMe: result.supportedByMe });
+};
+
+exports.unsupportComplaint = async (req, res) => {
+  const result = await complaintService.removeSupport({ id: req.params.id, userId: req.user._id });
+  if (result.changed) {
+    const complaint = await Complaint.findById(req.params.id)
+    .select("_id title user supportCount")
+    .lean();
+
+    if (complaint) {
+      notifySupport(req.app.get("io"), complaint);
     }
 
-    const [total, pending, inProgress, resolved, categoryCounts] =
-      await Promise.all([
-        Complaint.countDocuments(),
-        Complaint.countDocuments({ status: "Pending" }),
-        Complaint.countDocuments({ status: "In Progress" }),
-        Complaint.countDocuments({ status: "Resolved" }),
-        // Bonus: category breakdown for the new admin chart
-        Complaint.aggregate([
-          { $group: { _id: "$category", count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-        ]),
-      ]);
+}
+  res.json({ supportCount: result.supportCount, supportedByMe: result.supportedByMe });
+};
 
-    res.json({
-      total,
-      pending,
-      inProgress,
-      resolved,
-      categoryCounts,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
+exports.getStats = async (req, res) => {
+  res.json(await complaintService.getStats());
+};
+
+exports.getMap = async (req, res) => {
+  res.json(await complaintService.mapComplaints(req.validatedQuery));
+};
+
+exports.getAnalytics = async (req, res) => {
+  res.json(await complaintService.getAnalytics());
 };

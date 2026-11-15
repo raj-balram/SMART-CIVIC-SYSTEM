@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import API from "../utils/api";
 import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
+import { Link } from "react-router-dom";
 
 /* ── Helpers ────────────────────────────────────────────────── */
 const formatDate = (iso) =>
@@ -11,6 +12,15 @@ const formatDate = (iso) =>
 
 const getInitials = (name = "") =>
   name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+
+const formatHours = (h) => (h < 48 ? `${h} hours` : `${(h / 24).toFixed(1)} days`);
+
+const isOverdue = (c) => c.status !== "Resolved" && c.dueAt && new Date(c.dueAt) < new Date();
+const overdueFor = (c) => {
+  const h = Math.floor((Date.now() - new Date(c.dueAt)) / 3_600_000);
+  return h < 48 ? `${h}h` : `${Math.floor(h / 24)}d`;
+};
+
 
 /* ── Status config ──────────────────────────────────────────── */
 const STATUS_CONFIG = {
@@ -98,110 +108,279 @@ const CategoryChart = ({ data, total }) => {
     </div>
   );
 };
+/* Performance by category + the busiest areas */
+const AnalyticsPanel = ({ analytics }) => {
+  const { categories = [], hotspots = [] } = analytics;
+  if (categories.length === 0) return null;
 
-/* Status action buttons */
-const StatusActions = ({ id, current, onUpdate }) => {
-  const actions = [
-    { label: "Pending",     cls: "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200" },
-    { label: "In Progress", cls: "bg-blue-50  hover:bg-blue-100  text-blue-700  border border-blue-200"  },
-    { label: "Resolved",    cls: "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200" },
-  ];
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      {actions.map(({ label, cls }) => (
-        <button
-          key={label}
-          onClick={() => onUpdate(id, label)}
-          disabled={current === label}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border-none
-            ${current === label ? "opacity-40 cursor-not-allowed" : cls}`}
-        >
-          {label}
-        </button>
-      ))}
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+      <div className="lg:col-span-2 bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)] mb-3">Performance by category</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[11px] uppercase tracking-wider text-[var(--color-text-3)]">
+                <th className="py-2 font-semibold">Category</th>
+                <th className="py-2 font-semibold">Open</th>
+                <th className="py-2 font-semibold">Overdue</th>
+                <th className="py-2 font-semibold">Avg. resolution</th>
+                <th className="py-2 font-semibold">Met target</th>
+              </tr>
+            </thead>
+            <tbody>
+              {categories.map((c) => (
+                <tr key={c.category} className="border-t border-[var(--color-border)]">
+                  <td className="py-2 font-medium text-[var(--color-text-1)]">{c.category}</td>
+                  <td className="py-2 font-mono">{c.open}</td>
+                  <td className={`py-2 font-mono ${c.overdue > 0 ? "text-red-600 font-semibold" : ""}`}>{c.overdue}</td>
+                  <td className="py-2 font-mono">{c.avgResolutionHours == null ? "–" : formatHours(c.avgResolutionHours)}</td>
+                  <td className="py-2 font-mono">{c.slaCompliancePct == null ? "–" : `${c.slaCompliancePct}%`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)]">Busiest areas</h3>
+        <p className="text-[11px] text-[var(--color-text-3)] mb-3">Open complaints per area of about 550 m</p>
+        {hotspots.length === 0 ? (
+          <p className="text-xs text-[var(--color-text-3)]">No open complaints.</p>
+        ) : (
+          <ol className="space-y-3">
+            {hotspots.map((h) => (
+              <li key={`${h.lat},${h.lng}`} className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--color-text-1)]">
+                    {h.openCount} open · mostly {h.topCategory}
+                  </p>
+                  <p className="text-[11px] font-mono text-[var(--color-text-3)]">
+                    {h.lat.toFixed(4)}, {h.lng.toFixed(4)}
+                  </p>
+                </div>
+                <Link
+                  to={`/map?lat=${h.lat}&lng=${h.lng}&zoom=16`}
+                  className="text-xs text-[var(--color-accent)] hover:underline shrink-0"
+                >
+                  View on map
+                </Link>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </div>
   );
 };
 
-/* ── Main Dashboard ─────────────────────────────────────────── */
+/* 30-day trend: reported vs resolved per day */
+const TrendChart = ({ trend = [] }) => {
+  if (trend.length === 0) return null;
+  const max = Math.max(1, ...trend.flatMap((d) => [d.created, d.resolved]));
+  const W = 600, H = 120, pad = 4;
+  const slot = W / trend.length;
+  const bar = (slot - pad) / 2;
+
+  return (
+    <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)] p-5">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-[var(--color-text-1)]">Last 30 days</h3>
+        <div className="flex items-center gap-3 text-[11px] text-[var(--color-text-3)]">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-500" /> Reported</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-green-500" /> Resolved</span>
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-28" role="img"
+           aria-label="Complaints reported and resolved per day">
+        {trend.map((d, i) => {
+          const x = i * slot + pad / 2;
+          const hc = (d.created / max) * (H - 4);
+          const hr = (d.resolved / max) * (H - 4);
+          return (
+            <g key={d.date}>
+              <title>{`${d.date}: ${d.created} reported, ${d.resolved} resolved`}</title>
+              <rect x={x} y={H - hc} width={bar} height={hc} rx="1" className="fill-blue-500" />
+              <rect x={x + bar} y={H - hr} width={bar} height={hr} rx="1" className="fill-green-500" />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+};
+
+
+/* Status action buttons: only the moves the server will accept */
+const NEXT_STATUSES = {
+  Pending: ["In Progress"],
+  "In Progress": ["Pending", "Resolved"],
+  Resolved: ["In Progress"],
+};
+const ACTION_STYLES = {
+  Pending: "bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200",
+  "In Progress": "bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200",
+  Resolved: "bg-green-50 hover:bg-green-100 text-green-700 border border-green-200",
+};
+
+const StatusActions = ({ id, current, onUpdate }) => (
+  <div className="flex items-center gap-1.5 flex-wrap">
+    {(NEXT_STATUSES[current] ?? []).map((label) => (
+      <button
+        key={label}
+        onClick={() => onUpdate(id, label)}
+        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer border-none ${ACTION_STYLES[label]}`}
+      >
+        → {label}
+      </button>
+    ))}
+  </div>
+);
+
+const PAGE_SIZE = 20;
+
 const AdminDashboard = () => {
   const { socket } = useAuth();
 
-  const [complaints, setComplaints] = useState([]);
-  const [stats, setStats]           = useState({ total: 0, pending: 0, inProgress: 0, resolved: 0, categoryCounts: [] });
-  const [loading, setLoading]       = useState(true);
-  const [newCount, setNewCount]     = useState(0);
+  const [complaints, setComplaints] = useState([]); // the CURRENT PAGE only
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0, pending: 0, inProgress: 0, resolved: 0, categoryCounts: [], avgResolutionHours: null, trend: [],
+  });
+  const [loading, setLoading] = useState(true);
+  const [newCount, setNewCount] = useState(0);
 
   // Filters
-  const [search,      setSearch]      = useState("");
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("All");
-  const [filterCat,    setFilterCat]    = useState("All");
-  const [sortBy,       setSortBy]       = useState("newest");
+  const [filterCat, setFilterCat] = useState("All");
+  const [sortBy, setSortBy] = useState("newest");
+  const [overdueOnly, setOverdueOnly] = useState(false);
+  const [analytics, setAnalytics] = useState({ categories: [], hotspots: [] });
 
-  /* Fetch */
-  const fetchAll = async () => {
-    try {
-      const [cRes, sRes] = await Promise.all([
-        API.get("/complaints/all"),
-        API.get("/complaints/stats"),
-      ]);
-      setComplaints(cRes.data);
-      setStats(sRes.data);
-    } catch {
-      toast.error("Failed to load dashboard data");
-    } finally {
-      setLoading(false);
-    }
+  // wait until the admin stops typing before asking the server
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 400);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // changing a filter always goes back to page 1
+  const pick = (setter) => (e) => {
+    setter(e.target.value);
+    setPage(1);
+  };
+  const clearFilters = () => {
+    setSearch("");
+    setDebouncedSearch("");
+    setFilterStatus("All");
+    setFilterCat("All");
+    setPage(1);
+    setOverdueOnly(false);
   };
 
-  useEffect(() => { fetchAll(); }, []);
+  /* Fetch one page */
+  const latest = useRef(0); // lets us ignore a slow response that arrives after a newer one
+  const fetchList = useCallback(async () => {
+    const id = ++latest.current;
+    try {
+      const params = { page, limit: PAGE_SIZE, sort: sortBy };
+      if (filterStatus !== "All") params.status = filterStatus;
+      if (filterCat !== "All") params.category = filterCat;
+      if (debouncedSearch.length >= 2) params.q = debouncedSearch;
+      if (overdueOnly) params.overdue = "true";
 
-  /* Real-time new complaint */
-  useEffect(() => {
+      const res = await API.get("/complaints/list", { params });
+      if (id !== latest.current) return;
+      setComplaints(res.data.items);
+      setTotal(res.data.total);
+      setTotalPages(res.data.totalPages);
+    } catch (err) {
+      if (id === latest.current) toast.error(err.response?.data?.message || "Failed to load complaints");
+    } finally {
+      if (id === latest.current) setLoading(false);
+    }
+  }, [page, sortBy, filterStatus, filterCat, debouncedSearch, overdueOnly]);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      setStats((await API.get("/complaints/stats")).data);
+    } catch {
+      toast.error("Failed to load statistics");
+    }
+  }, []);
+
+    const fetchAnalytics = useCallback(async () => {
+    try {
+      setAnalytics((await API.get("/complaints/analytics")).data);
+    } catch {
+      /* the panel simply stays empty */
+    }
+  }, []);
+  useEffect(() => { fetchAnalytics(); }, [fetchAnalytics]);
+
+  useEffect(() => { fetchList(); }, [fetchList]);
+  useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  /* Real-time: refresh the page and the numbers; debounced so a burst causes one refresh */
+  const refreshTimer = useRef(null);
+  const refreshSoon = useCallback(() => {
+    clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      fetchList();
+      fetchStats();
+      fetchAnalytics();
+    }, 400);
+  }, [fetchList, fetchStats, fetchAnalytics]);
+  useEffect(() => () => clearTimeout(refreshTimer.current), []);
+
+    useEffect(() => {
     if (!socket) return;
-    socket.on("newComplaint", (c) => {
-      setComplaints((prev) => [c, ...prev]);
-      setStats((prev) => ({ ...prev, total: prev.total + 1, pending: prev.pending + 1 }));
+    const onCreated = (c) => {
       setNewCount((n) => n + 1);
       toast.success(`New complaint: ${c.title}`);
-    });
-    return () => socket.off("newComplaint");
-  }, [socket]);
+      refreshSoon();
+    };
+    const onChanged = () => refreshSoon();
+    const onOverdue = (p) => {
+      toast.error(`${p.count} complaint${p.count !== 1 ? "s" : ""} just became overdue`);
+      refreshSoon();
+    };
 
-  /* Update status */
+    socket.on("complaint:created", onCreated);
+    socket.on("complaint:updated", onChanged);
+    socket.on("complaint:supported", onChanged);
+    socket.on("complaint:overdue", onOverdue);
+    return () => {
+      socket.off("complaint:created", onCreated);
+      socket.off("complaint:updated", onChanged);
+      socket.off("complaint:supported", onChanged);
+      socket.off("complaint:overdue", onOverdue);
+    };
+  }, [socket, refreshSoon]);
+
+  /* Update status (the note prompt becomes a proper dialog in the polish phase) */
   const updateStatus = async (id, status) => {
+    const note = window.prompt(`Move to "${status}". Add a short note for the citizen (optional):`, "");
+    if (note === null) return; // cancelled
     try {
-      await API.put(`/complaints/${id}/status`, { status });
-      setComplaints((prev) => prev.map((c) => c._id === id ? { ...c, status } : c));
-      // Recompute stats client-side
-      const updated = complaints.map((c) => c._id === id ? { ...c, status } : c);
-      setStats((prev) => ({
-        ...prev,
-        pending:    updated.filter((c) => c.status === "Pending").length,
-        inProgress: updated.filter((c) => c.status === "In Progress").length,
-        resolved:   updated.filter((c) => c.status === "Resolved").length,
-      }));
+      await API.put(`/complaints/${id}/status`, { status, note: note.trim().slice(0, 200) });
       toast.success("Status updated");
-    } catch {
-      toast.error("Failed to update status");
+    } catch (err) {
+      toast.error(err.response?.data?.message || "Failed to update status");
     }
+    fetchList();
+    fetchStats();
+    fetchAnalytics();
   };
 
-  /* Filtered + sorted list */
-  const filtered = useMemo(() => {
-    let list = [...complaints];
-    if (filterStatus !== "All") list = list.filter((c) => c.status === filterStatus);
-    if (filterCat    !== "All") list = list.filter((c) => c.category === filterCat);
-    if (search.trim())
-      list = list.filter((c) =>
-        c.title.toLowerCase().includes(search.toLowerCase()) ||
-        c.user?.name?.toLowerCase().includes(search.toLowerCase())
-      );
-    if (sortBy === "newest") list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    if (sortBy === "oldest") list.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-    if (sortBy === "status") list.sort((a, b) => a.status.localeCompare(b.status));
-    return list;
-  }, [complaints, filterStatus, filterCat, search, sortBy]);
+  const filtered = complaints; // the server already filtered, sorted and paged it
 
   /* ── Render ── */
   return (
@@ -291,6 +470,14 @@ const AdminDashboard = () => {
                   <span className="text-2xl text-[var(--color-text-3)]">%</span>
                 </p>
                 <p className="text-xs text-[var(--color-text-3)] mt-2">of all complaints resolved</p>
+                                {stats.avgResolutionHours != null && (
+                  <p className="text-[11px] text-[var(--color-text-3)] mt-1">
+                    Average resolution time: {formatHours(stats.avgResolutionHours)}
+                    {stats.overdue > 0 && (
+                    <p className="text-[11px] text-red-600 mt-1 font-medium">⚠ {stats.overdue} overdue</p>
+                    )}
+                  </p>
+                )}
               </div>
 
               {/* Progress bar */}
@@ -313,6 +500,9 @@ const AdminDashboard = () => {
         </div>
       </div>
 
+      <TrendChart trend={stats.trend} />
+      <AnalyticsPanel analytics={analytics} />
+
       {/* ── Complaints table ── */}
       <div className="bg-white border border-[var(--color-border)] rounded-xl shadow-[var(--shadow-sm)]">
 
@@ -320,7 +510,7 @@ const AdminDashboard = () => {
         <div className="px-5 py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-[var(--color-text-1)]">All complaints</h3>
-            <p className="text-xs text-[var(--color-text-3)] mt-0.5">{filtered.length} shown</p>
+            <p className="text-xs text-[var(--color-text-3)] mt-0.5">{total} match</p>
           </div>
 
           {/* Search */}
@@ -330,7 +520,7 @@ const AdminDashboard = () => {
             </svg>
             <input
               type="text"
-              placeholder="Search title or user…"
+              placeholder="Search whole words in title or description…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-8 pr-3 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15 transition-all w-44"
@@ -340,7 +530,7 @@ const AdminDashboard = () => {
           {/* Status filter */}
           <select
             value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)}
+            onChange={pick(setFilterStatus)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="All">All statuses</option>
@@ -352,7 +542,7 @@ const AdminDashboard = () => {
           {/* Category filter */}
           <select
             value={filterCat}
-            onChange={(e) => setFilterCat(e.target.value)}
+            onChange={pick(setFilterCat)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="All">All categories</option>
@@ -366,13 +556,23 @@ const AdminDashboard = () => {
           {/* Sort */}
           <select
             value={sortBy}
-            onChange={(e) => setSortBy(e.target.value)}
+            onChange={pick(setSortBy)}
             className="px-2.5 py-1.5 border border-[var(--color-border)] rounded-md text-xs text-[var(--color-text-1)] bg-white outline-none focus:border-[var(--color-accent)] cursor-pointer"
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="status">By status</option>
+            <option value="support">Most supported</option>
           </select>
+
+          <label className="flex items-center gap-1.5 text-xs text-[var(--color-text-2)] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={overdueOnly}
+              onChange={(e) => { setOverdueOnly(e.target.checked); setPage(1); }}
+            />
+            Overdue only
+          </label>
         </div>
 
         {/* Loading skeleton */}
@@ -408,6 +608,7 @@ const AdminDashboard = () => {
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Submitted by</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Category</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Status</th>
+                  <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Supporters</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3 hidden md:table-cell">Date</th>
                   <th className="text-left text-[11px] font-semibold text-[var(--color-text-3)] uppercase tracking-wider px-4 py-3">Actions</th>
                 </tr>
@@ -455,7 +656,19 @@ const AdminDashboard = () => {
 
                     {/* Status */}
                     <td className="px-4 py-3.5">
-                      <StatusBadge status={c.status} />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <StatusBadge status={c.status} />
+                        {isOverdue(c) && (
+                          <span className="text-[10px] font-semibold text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded-full">
+                            Overdue {overdueFor(c)}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* Supporters */}
+                    <td className="px-4 py-3.5 text-xs font-mono text-[var(--color-text-2)]">
+                      {c.supportCount ?? 0}
                     </td>
 
                     {/* Date */}
@@ -478,20 +691,36 @@ const AdminDashboard = () => {
           </div>
         )}
 
-        {/* Table footer */}
-        {!loading && filtered.length > 0 && (
-          <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between">
+        {/* Table footer + pager */}
+        {!loading && total > 0 && (
+          <div className="px-5 py-3 border-t border-[var(--color-border)] flex items-center justify-between gap-3 flex-wrap">
             <p className="text-xs text-[var(--color-text-3)]">
-              Showing {filtered.length} of {complaints.length} complaints
+              Page {page} of {totalPages} · {total} complaint{total !== 1 ? "s" : ""}
             </p>
-            {(search || filterStatus !== "All" || filterCat !== "All") && (
+            <div className="flex items-center gap-2">
+              {(search || filterStatus !== "All" || filterCat !== "All" || overdueOnly) && (
+                <button
+                  onClick={clearFilters}
+                  className="text-xs text-[var(--color-accent)] hover:underline bg-transparent border-none cursor-pointer"
+                >
+                  Clear filters
+                </button>
+              )}
               <button
-                onClick={() => { setSearch(""); setFilterStatus("All"); setFilterCat("All"); }}
-                className="text-xs text-[var(--color-accent)] hover:underline bg-transparent border-none cursor-pointer"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1 text-xs rounded-md border border-[var(--color-border)] bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Clear filters
+                Previous
               </button>
-            )}
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-3 py-1 text-xs rounded-md border border-[var(--color-border)] bg-white cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
           </div>
         )}
       </div>

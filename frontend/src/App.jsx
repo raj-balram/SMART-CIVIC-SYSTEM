@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import RealtimeNotifications from "./components/RealtimeNotifications";
 
 import Login from "./pages/Login";
 import Register from "./pages/Register";
@@ -14,7 +15,12 @@ const ProtectedLayout = ({ children, adminOnly = false }) => {
   const { isAuth, user } = useAuth();
   if (!isAuth) return <Navigate to="/login" replace />;
   if (adminOnly && user?.role !== "admin") return <Navigate to="/" replace />;
-  return <Layout>{children}</Layout>;
+  return (
+    <Layout>
+      <RealtimeNotifications />
+      {children}
+    </Layout>
+  );
 };
 
 function App() {

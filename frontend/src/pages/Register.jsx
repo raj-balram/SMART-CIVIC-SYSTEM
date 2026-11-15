@@ -6,8 +6,6 @@ import { useAuth } from "../context/AuthContext";
 
 const Register = () => {
   const [form, setForm]           = useState({ name: "", email: "", password: "" });
-  const [adminSecret, setSecret]  = useState("");
-  const [showSecret, setShowSecret] = useState(false);
   const [loading, setLoading]     = useState(false);
   const { login }  = useAuth();
   const navigate   = useNavigate();
@@ -18,13 +16,13 @@ const Register = () => {
       toast.error("Please fill in all required fields");
       return;
     }
-    if (form.password.length < 6) {
-      toast.error("Password must be at least 6 characters");
-      return;
+    if (form.password.length < 8) {
+     toast.error("Password must be at least 8 characters");
+     return;
     }
     try {
       setLoading(true);
-      const res = await API.post("/auth/register", { ...form, adminSecret });
+      const res = await API.post("/auth/register", form);
       login(res.data, res.data.token);
       toast.success("Account created successfully");
       navigate("/");
@@ -133,32 +131,14 @@ const Register = () => {
               <input
                 type="password"
                 className="w-full px-3 py-2.5 border border-[var(--color-border)] rounded-md text-sm text-[var(--color-text-1)] bg-white placeholder-[var(--color-text-3)] outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15 transition-all"
-                placeholder="Min. 6 characters"
+                placeholder="Min. 8 characters"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 autoComplete="new-password"
               />
             </div>
 
-            {/* Admin secret — hidden by default */}
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowSecret((v) => !v)}
-                className="text-xs text-[var(--color-text-3)] hover:text-[var(--color-text-2)] transition-colors bg-transparent border-none cursor-pointer p-0 font-[inherit]"
-              >
-                {showSecret ? "▾" : "▸"} Admin registration (optional)
-              </button>
-              {showSecret && (
-                <input
-                  type="password"
-                  className="mt-2 w-full px-3 py-2.5 border border-[var(--color-border)] rounded-md text-sm text-[var(--color-text-1)] bg-white placeholder-[var(--color-text-3)] outline-none focus:border-[var(--color-accent)] focus:ring-2 focus:ring-[var(--color-accent)]/15 transition-all"
-                  placeholder="Admin secret key"
-                  value={adminSecret}
-                  onChange={(e) => setSecret(e.target.value)}
-                />
-              )}
-            </div>
+            
 
             <button
               type="submit"

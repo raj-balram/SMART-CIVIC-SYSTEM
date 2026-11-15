@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, upgrade]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      MONGOMS_VERSION: "7.0.14"
+      MONGOMS_DOWNLOAD_DIR: ${{ github.workspace }}/.cache/mongodb-binaries
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Cache the MongoDB binary used by the tests
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.cache/mongodb-binaries
+          key: mongoms-7.0.14
+      - run: npm ci
+      - run: npm test
+      - name: Check production dependencies for known vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true # becomes a hard failure once the audit is clean (Part 6)
+
+  frontend:
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  docker:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t civic-backend ./backend
+      - run: docker build -t civic-frontend ./frontend
