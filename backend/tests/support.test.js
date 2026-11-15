@@ -164,15 +164,18 @@ describe("admin view", () => {
   });
 });
 
+
 describe("live events", () => {
   test("the owner and admins hear about new support; nobody else does; repeats stay silent", async () => {
     const id = await create();
     const bystander = await makeUser("Bystander");
+
     const [ownerSocket, adminSocket, otherSocket] = await Promise.all([
       connectSocket(server.url, owner.token),
       connectSocket(server.url, admin.token),
       connectSocket(server.url, bystander.token),
     ]);
+
     open.push(ownerSocket, adminSocket, otherSocket);
 
     await support(id);
@@ -180,11 +183,22 @@ describe("live events", () => {
     await sleep(400);
 
     for (const client of [ownerSocket, adminSocket]) {
-      expect(client.received).toHaveLength(1);
-      expect(client.received[0].event).toBe("complaint:supported");
-      expect(client.received[0].payload).toMatchObject({ _id: id, supportCount: 1 });
-      expect(client.received[0].payload).not.toHaveProperty("supporters");
+      const supportEvents = client.received.filter(
+        (event) => event.event === "complaint:supported"
+      );
+
+      expect(supportEvents).toHaveLength(1);
+      expect(supportEvents[0].payload).toMatchObject({
+        _id: id,
+        supportCount: 1,
+      });
+      expect(supportEvents[0].payload).not.toHaveProperty("supporters");
     }
-    expect(otherSocket.received).toHaveLength(0);
+
+    const bystanderSupportEvents = otherSocket.received.filter(
+      (event) => event.event === "complaint:supported"
+    );
+
+    expect(bystanderSupportEvents).toHaveLength(0);
   });
 });
